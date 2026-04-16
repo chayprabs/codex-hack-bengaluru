@@ -119,6 +119,7 @@ function mergeAuditComplete(audit: Audit, event: AuditCompleteEvent) {
     status: event.status,
     repo_url: event.repo_url || audit.repo_url,
     score: event.score,
+    completion_message: event.message ?? null,
     updated_at: keepLatestTimestamp(audit.updated_at, event.updated_at),
   };
 }
@@ -143,7 +144,7 @@ function toCompletionEvent(audit: Audit): AuditCompleteEvent | null {
     score: audit.score,
     updated_at: audit.updated_at,
     finding_count: audit.findings.length,
-    message: null,
+    message: audit.completion_message,
   };
 }
 

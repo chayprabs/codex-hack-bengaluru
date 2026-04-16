@@ -42,19 +42,22 @@ Notes:
 
 - Create one Railway service for this repo.
 - Set the service `Root Directory` to `apps/api`.
+- Set `Watch Paths` to `/apps/api/**`.
 
 Railway's monorepo docs recommend setting a root directory per service so the deployment uses only that subdirectory.
 
 ### Build And Start
 
-- Builder: leave the default Railpack builder
-- Build command: leave blank unless you need to override auto-detection
-- Start command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+- Builder: use the `Dockerfile` in `apps/api`
+- Build command: leave blank
+- Start command: leave blank if Railway is using the Dockerfile's default command
+- Optional config-as-code file: `/apps/api/railway.toml`
 
-Why set the start command explicitly:
+Why this is the most reliable monorepo setup right now:
 
-- Railway supports custom start commands for monorepos
-- this FastAPI service does not expose a default `main.py` entrypoint that Railway would reliably auto-start on its own
+- Railway was previously trying to infer a Node app from the monorepo root and failed with `No start command detected`
+- the backend now ships with its own `Dockerfile` and an explicit Uvicorn command that binds `0.0.0.0` and uses `PORT`
+- `apps/api/railway.toml` mirrors the same start command plus a health check if you choose to point Railway at that config file
 
 ### Environment Variables
 
@@ -77,19 +80,22 @@ Notes:
 
 - for multiple frontend origins, set `CORS_ORIGINS` as a comma-separated list
 - `DATABASE_URL=sqlite:///./trustlayer.db` works, but SQLite on Railway is not durable across restarts or redeploys
+- if you use the checked-in Railway config file, remember Railway config paths are absolute in monorepos, so the value should be `/apps/api/railway.toml`
 - if you later move to a managed database, update `DATABASE_URL` accordingly
 
 ## Monorepo Notes
 
 - Vercel and Railway should each point to the same Git repository, but different subdirectories
-- no `vercel.json`, `railway.toml`, or `railway.json` was added on purpose; dashboard settings are enough for the current setup
+- the backend now includes `apps/api/Dockerfile` and `apps/api/railway.toml` so the API can deploy independently of the frontend
 - if you change the public Railway URL, update `NEXT_PUBLIC_API_BASE_URL` in Vercel and redeploy the web app
 
 ## Minimal Rollout Order
 
 1. Deploy `apps/api` to Railway.
-2. Generate the public Railway domain.
-3. Set `CORS_ORIGINS` on Railway to your Vercel domain.
-4. Set `NEXT_PUBLIC_API_BASE_URL` on Vercel to the Railway URL plus `/api`.
-5. Deploy `apps/web` to Vercel.
-6. Verify `https://your-api.up.railway.app/api/health` and the web app's demo audit flow.
+2. Confirm Railway is using the `apps/api` root directory and the backend Dockerfile.
+3. Optional: set the Railway config file path to `/apps/api/railway.toml`.
+4. Generate the public Railway domain.
+5. Set `CORS_ORIGINS` on Railway to your Vercel domain.
+6. Set `NEXT_PUBLIC_API_BASE_URL` on Vercel to the Railway URL plus `/api`.
+7. Deploy `apps/web` to Vercel.
+8. Verify `https://your-api.up.railway.app/api/health` and the web app's demo audit flow.

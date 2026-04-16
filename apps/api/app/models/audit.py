@@ -35,6 +35,7 @@ class Audit(StrictModel):
     repo_url: str
     status: AuditState = "queued"
     score: int = Field(default=100, ge=0, le=100)
+    completion_message: str | None = None
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
     agents: list[AgentStatus] = Field(default_factory=list)

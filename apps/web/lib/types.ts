@@ -24,6 +24,7 @@ export type Audit = {
   repo_url: string;
   status: AuditState;
   score: number;
+  completion_message: string | null;
   created_at: string;
   updated_at: string;
   agents: AgentStatus[];

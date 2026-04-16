@@ -16,12 +16,15 @@ from .types import AgentContext, AgentResult, FindingSeverity
 from .utils import (
     AgentExecutionCheck,
     get_assignment,
+    get_execution_backend,
     load_repo_map,
     normalize_assignment_targets,
+    result_status_for_execution_checks,
     resolve_repo_root,
+    run_context_command,
     trim_output,
 )
-from ..sandbox import CommandResult, SandboxCommandError, run_command
+from ..sandbox import CommandResult, SandboxCommandError
 
 BuildbreakFindingKind = Literal[
     "missing_package_manager_metadata",
@@ -70,6 +73,7 @@ class BuildbreakFinding(BaseModel):
 class BuildbreakReport(BaseModel):
     root_path: str
     project_roots: list[str] = Field(default_factory=list)
+    execution_backend: dict[str, Any] | None = None
     checks: list[AgentExecutionCheck] = Field(default_factory=list)
     findings: list[BuildbreakFinding] = Field(default_factory=list)
 
@@ -113,7 +117,11 @@ class BuildbreakAgent(BaseAgent):
             for item in report.findings
         ]
 
-        status = "completed" if report.project_roots else "skipped"
+        status = result_status_for_execution_checks(
+            report.checks,
+            has_targets=bool(report.project_roots),
+            finding_count=len(findings),
+        )
         summary = self._build_summary(report)
         return self.result(
             status=status,
@@ -128,13 +136,14 @@ class BuildbreakAgent(BaseAgent):
         report = BuildbreakReport(
             root_path=str(root),
             project_roots=[project.display_path for project in projects],
+            execution_backend=get_execution_backend(context),
         )
 
         for project in projects:
             if project.kind == "node":
-                findings, checks = self._analyze_node_project(project)
+                findings, checks = self._analyze_node_project(context, project)
             else:
-                findings, checks = self._analyze_python_project(project)
+                findings, checks = self._analyze_python_project(context, project)
             report.findings.extend(findings)
             report.checks.extend(checks)
 
@@ -214,6 +223,7 @@ class BuildbreakAgent(BaseAgent):
 
     def _analyze_node_project(
         self,
+        context: AgentContext,
         project: _ProjectRoot,
     ) -> tuple[list[BuildbreakFinding], list[AgentExecutionCheck]]:
         findings: list[BuildbreakFinding] = []
@@ -303,6 +313,7 @@ class BuildbreakAgent(BaseAgent):
         if "build" in scripts:
             build_command = self._node_script_command(package_manager, "build")
             check, result = self._run_check(
+                context=context,
                 label=f"{project.display_path}:build",
                 command=build_command,
                 cwd=project.path,
@@ -314,6 +325,7 @@ class BuildbreakAgent(BaseAgent):
         if "test" in scripts:
             test_command = self._node_script_command(package_manager, "test")
             check, result = self._run_check(
+                context=context,
                 label=f"{project.display_path}:test",
                 command=test_command,
                 cwd=project.path,
@@ -326,6 +338,7 @@ class BuildbreakAgent(BaseAgent):
 
     def _analyze_python_project(
         self,
+        context: AgentContext,
         project: _ProjectRoot,
     ) -> tuple[list[BuildbreakFinding], list[AgentExecutionCheck]]:
         findings: list[BuildbreakFinding] = []
@@ -351,6 +364,7 @@ class BuildbreakAgent(BaseAgent):
 
         source_paths = self._python_compile_targets(project.path)
         check, result = self._run_check(
+            context=context,
             label=f"{project.display_path}:compileall",
             command=["python", "-m", "compileall", *source_paths],
             cwd=project.path,
@@ -374,7 +388,7 @@ class BuildbreakAgent(BaseAgent):
 
         tests_dir = project.path / "tests"
         if tests_dir.is_dir():
-            if not self._python_module_available(project.path, "pytest"):
+            if not self._python_module_available(context, project.path, "pytest"):
                 checks.append(
                     self._skipped_check(
                         label=f"{project.display_path}:pytest",
@@ -384,6 +398,7 @@ class BuildbreakAgent(BaseAgent):
                 )
             else:
                 check, result = self._run_check(
+                    context=context,
                     label=f"{project.display_path}:pytest",
                     command=["python", "-m", "pytest", "-q"],
                     cwd=project.path,
@@ -409,8 +424,9 @@ class BuildbreakAgent(BaseAgent):
         targets = [name for name in PYTHON_SOURCE_DIRS if (project_root / name).is_dir()]
         return targets or ["."]
 
-    def _python_module_available(self, cwd: Path, module_name: str) -> bool:
+    def _python_module_available(self, context: AgentContext, cwd: Path, module_name: str) -> bool:
         check, result = self._run_check(
+            context=context,
             label=f"{cwd.name}:probe:{module_name}",
             command=["python", "-c", f"import {module_name}"],
             cwd=cwd,
@@ -502,6 +518,7 @@ class BuildbreakAgent(BaseAgent):
     def _run_check(
         self,
         *,
+        context: AgentContext,
         label: str,
         command: list[str],
         cwd: Path,
@@ -509,7 +526,8 @@ class BuildbreakAgent(BaseAgent):
     ) -> tuple[AgentExecutionCheck, CommandResult | None]:
         resolved_command = self._resolve_command(command)
         try:
-            result = run_command(
+            result = run_context_command(
+                context,
                 resolved_command,
                 cwd=cwd,
                 timeout_seconds=self.command_timeout_seconds,
@@ -611,11 +629,20 @@ class BuildbreakAgent(BaseAgent):
 
     def _build_summary(self, report: BuildbreakReport) -> str:
         failed_checks = sum(1 for check in report.checks if check.status == "failed")
+        error_checks = sum(1 for check in report.checks if check.status == "error")
         skipped_checks = sum(1 for check in report.checks if check.status == "skipped")
         if not report.project_roots:
             return "No buildable project roots were selected for buildbreak analysis."
-        return (
+        summary = (
             f"Checked {len(report.project_roots)} project roots with {len(report.checks)} build/test checks, "
             f"found {len(report.findings)} buildbreak findings, {failed_checks} failed checks, "
-            f"and {skipped_checks} skipped checks."
+            f"{error_checks} execution errors, and {skipped_checks} skipped checks."
         )
+        fallback_reason = (
+            str(report.execution_backend.get("fallback_reason"))
+            if report.execution_backend and report.execution_backend.get("fallback_reason")
+            else ""
+        )
+        if fallback_reason:
+            return f"{summary} {fallback_reason}"
+        return summary

@@ -14,7 +14,14 @@ from ..core.sse import (
     publish_finding,
     publish_score_update,
 )
-from ..sandbox import AcquiredRepository, RepositoryAcquisitionError, acquire_repository
+from ..sandbox import (
+    AcquiredRepository,
+    ExecutionLayerError,
+    ExecutionSession,
+    RepositoryAcquisitionError,
+    acquire_repository,
+    resolve_execution_backend,
+)
 from ..models import (
     AgentStatus,
     AgentStatusEvent,
@@ -25,6 +32,7 @@ from ..models import (
     ScoreUpdateEvent,
     utc_now,
 )
+from ..sandbox.execution_layer import ExecutionMode
 from .agent_runner import AgentExecutionMode, AgentRunResult, AgentSystemRunner, agent_system_runner
 from .audit_simulation import AuditLifecycleStep, AuditSimulationPlanBuilder, build_default_simulation_steps
 from .scoring import ScoringService, scoring_service
@@ -52,6 +60,8 @@ class AuditRunner:
         agent_runner: AgentSystemRunner | None = None,
         repository_acquirer=acquire_repository,
         execution_mode: AgentExecutionMode = "auto",
+        execution_backend: ExecutionMode = "auto",
+        execution_backend_resolver=resolve_execution_backend,
         scorer: ScoringService | None = None,
     ) -> None:
         self.repository = repository
@@ -59,6 +69,8 @@ class AuditRunner:
         self.agent_runner = agent_runner or agent_system_runner
         self.repository_acquirer = repository_acquirer
         self.execution_mode = execution_mode
+        self.execution_backend = execution_backend
+        self.execution_backend_resolver = execution_backend_resolver
         self.scorer = scorer or scoring_service
         self._active_runs: set[str] = set()
         self._lock = Lock()
@@ -110,6 +122,8 @@ class AuditRunner:
     def _run_live_lifecycle(self, audit_id: str, audit: Audit) -> None:
         state = _LiveAuditState()
         acquired_repository: AcquiredRepository | None = None
+        execution_session: ExecutionSession | None = None
+        effective_execution_mode = self.execution_mode
 
         try:
             self._set_agent_status(
@@ -126,11 +140,37 @@ class AuditRunner:
                 self._complete_with_workspace_limitation(audit_id, exc, state)
                 return
 
+            execution_status_message = "Workspace ready. Running repo mapper and planner."
+            try:
+                execution_selection = self.execution_backend_resolver(mode=self.execution_backend)
+                execution_session = ExecutionSession(
+                    workspace=acquired_repository.workspace,
+                    selection=execution_selection,
+                )
+                execution_status_message = self._workspace_ready_message(execution_selection)
+            except ExecutionLayerError as exc:
+                effective_execution_mode = "no_execution"
+                self._record_operational_finding(
+                    audit_id,
+                    state,
+                    key="execution-layer-setup",
+                    severity="low",
+                    title="Sandbox execution backend could not be prepared",
+                    summary=(
+                        f"{exc.message} "
+                        "TrustLayer continued with read-only agent analysis where possible."
+                    ),
+                )
+                execution_status_message = (
+                    "Workspace ready. Running repo mapper and planner without command execution."
+                )
+                execution_selection = None
+
             self._set_agent_status(
                 audit_id,
                 "planner",
                 "running",
-                "Workspace ready. Running repo mapper and planner.",
+                execution_status_message,
             )
 
             run_result = asyncio.run(
@@ -138,7 +178,9 @@ class AuditRunner:
                     repo_path=str(acquired_repository.repo_path),
                     repo_url=audit.repo_url,
                     audit_id=audit_id,
-                    execution_mode=self.execution_mode,
+                    execution_mode=effective_execution_mode,
+                    execution_session=execution_session,
+                    execution_selection=execution_selection,
                     on_agent_result=lambda result: self._handle_live_agent_result(audit_id, result, state),
                 )
             )
@@ -451,6 +493,7 @@ class AuditRunner:
         def updater(audit: Audit) -> Audit:
             now = utc_now()
             audit.status = "failed"
+            audit.completion_message = reason
             audit.updated_at = now
             next_agents: list[AgentStatus] = []
             for agent in audit.agents:
@@ -579,6 +622,7 @@ class AuditRunner:
     ) -> Audit | None:
         def updater(audit: Audit) -> Audit:
             audit.status = "completed"
+            audit.completion_message = message
             audit.updated_at = utc_now()
             return audit
 
@@ -743,6 +787,13 @@ class AuditRunner:
         if run_result.status == "needs_review":
             return "Completed with findings that still need manual review. Review the findings before trusting the score."
         return None
+
+    @staticmethod
+    def _workspace_ready_message(execution_selection) -> str:
+        message = "Workspace ready. Running repo mapper and planner."
+        if execution_selection.fallback_reason:
+            return f"{message} {execution_selection.fallback_reason}"
+        return message
 
     @staticmethod
     def _build_agent_update(

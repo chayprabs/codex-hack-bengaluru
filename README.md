@@ -12,6 +12,7 @@ What works today:
 - shame wall page backed by stored findings
 - FastAPI endpoints for health, audits, demo audit creation, audit streaming, and wall data
 - local SQLite persistence plus seeded demo audits on backend startup
+- live audits that attempt safe repo acquisition, map/plan registered agents, and run workspace-bound execution checks when appropriate
 - repo-local setup installs API dev tooling so unit tests and backend checks can run out of the box
 
 ## Repo Structure
@@ -20,9 +21,8 @@ What works today:
 .
 |-- apps/
 |   |-- web/         # Next.js frontend
-|   `-- api/         # FastAPI backend
-|-- infra/
-|   `-- docker/      # API Dockerfile
+|   `-- api/         # FastAPI backend + Railway Dockerfile/config
+|-- infra/           # extra deployment notes/helpers
 |-- scripts/         # local dev runner scripts
 |-- .env.example
 |-- DEPLOYMENT.md
@@ -54,6 +54,7 @@ NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000/api
 DATABASE_URL=sqlite:///./trustlayer.db
 DEMO_REPO_URL=https://github.com/vercel/next.js
 CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+AUDIT_EXECUTION_BACKEND=auto
 ```
 
 Notes:
@@ -61,6 +62,7 @@ Notes:
 - the web app expects `NEXT_PUBLIC_API_BASE_URL` to include the `/api` prefix
 - `OPENAI_API_KEY` and `GITHUB_TOKEN` are optional for the current demo flow
 - the API reads `apps/api/.env` first, then falls back to the root `.env`
+- `AUDIT_EXECUTION_BACKEND` supports `auto`, `local`, or `docker`; `docker` currently degrades to the local sandbox with a surfaced fallback note
 
 ## Quick Start
 
@@ -183,14 +185,16 @@ That returns an audit payload with an `id`. Open `http://localhost:3000/audit/<i
 
 1. Create a new Railway service from this repo.
 2. Set the service root to `apps/api`.
-3. Leave the build command blank so Railway can auto-detect the Python build.
-4. Use this start command:
+3. Set the watch path to `/apps/api/**`.
+4. Let Railway build from `apps/api/Dockerfile`.
+5. Optional but recommended: set the Railway config file path to `/apps/api/railway.toml` so the start command and health check are pinned in code.
+6. If you are using the Dockerfile, leave the dashboard start command blank. The image already starts with:
 
 ```text
 uvicorn app.main:app --host 0.0.0.0 --port $PORT
 ```
 
-5. Set these environment variables:
+7. Set these environment variables:
 
 ```env
 DATABASE_URL=sqlite:///./trustlayer.db
@@ -209,7 +213,7 @@ For the platform-by-platform monorepo setup, see [DEPLOYMENT.md](./DEPLOYMENT.md
 
 ## Known Limitations
 
-- audits are currently simulated from demo profiles, not real repository analysis yet
+- demo audits are still simulated for speed, while live audits now attempt sandboxed repo acquisition and registered-agent analysis with partial-completion fallbacks
 - the SSE broker is in-process, so live events are designed for single-instance hackathon deployments
 - SQLite state is local to the running instance and will not be durable on Railway restarts or redeploys
 - there is no auth, user isolation, or background job queue yet

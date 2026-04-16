@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Collection, Mapping, Sequence
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -8,6 +9,9 @@ from typing import TYPE_CHECKING, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
+
+from ..sandbox import CommandResult, ExecutionSession, run_command
+from ..sandbox.executor import CommandPart
 
 if TYPE_CHECKING:
     from .types import AgentContext
@@ -112,6 +116,64 @@ class AgentExecutionCheck(BaseModel):
     error_code: str | None = None
     stdout_excerpt: str = ""
     stderr_excerpt: str = ""
+
+
+def get_execution_session(context: AgentContext) -> ExecutionSession | None:
+    session = context.metadata.get("execution_session")
+    return session if isinstance(session, ExecutionSession) else None
+
+
+def get_execution_backend(context: AgentContext) -> dict[str, object] | None:
+    backend = context.metadata.get("execution_backend")
+    return dict(backend) if isinstance(backend, Mapping) else None
+
+
+def run_context_command(
+    context: AgentContext,
+    command: Sequence[CommandPart],
+    *,
+    cwd: str | Path,
+    timeout_seconds: float | None = 60.0,
+    env: Mapping[str, str | None] | None = None,
+    allowed_executables: Collection[str] | None = None,
+) -> CommandResult:
+    session = get_execution_session(context)
+    if session is not None:
+        return session.run_command(
+            command,
+            cwd=cwd,
+            timeout_seconds=timeout_seconds,
+            env=env,
+            allowed_executables=allowed_executables,
+        )
+    return run_command(
+        command,
+        cwd=cwd,
+        timeout_seconds=timeout_seconds,
+        env=env,
+        allowed_executables=allowed_executables,
+    )
+
+
+def result_status_for_execution_checks(
+    checks: Sequence[AgentExecutionCheck],
+    *,
+    has_targets: bool = True,
+    finding_count: int = 0,
+) -> str:
+    if not has_targets:
+        return "skipped"
+
+    statuses = {check.status for check in checks}
+    if "error" in statuses:
+        return "needs_review"
+    if "failed" in statuses and finding_count == 0:
+        return "needs_review"
+    if "passed" in statuses or finding_count > 0:
+        return "completed"
+    if "skipped" in statuses:
+        return "needs_review"
+    return "completed"
 
 
 def resolve_repo_root(context: AgentContext) -> Path:

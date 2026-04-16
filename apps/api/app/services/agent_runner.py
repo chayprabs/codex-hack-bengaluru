@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from typing import Any
 from typing import Literal
 
 from pydantic import Field
@@ -19,6 +20,7 @@ from ..agents import (
     agent_registry,
 )
 from ..models.common import StrictModel
+from ..sandbox import ExecutionBackendSelection, ExecutionSession
 from .scoring import ScoringService, TrustScoreSummary, scoring_service
 
 AgentExecutionMode = Literal["auto", "no_execution"]
@@ -85,6 +87,7 @@ class AgentRunResult(StrictModel):
     audit_id: str | None = None
     ref: str | None = None
     execution_mode: AgentExecutionMode = "auto"
+    execution_backend: dict[str, Any] | None = None
     selected_agents: list[str] = Field(default_factory=list)
     executed_agents: list[str] = Field(default_factory=list)
     skipped_agents: list[str] = Field(default_factory=list)
@@ -118,6 +121,8 @@ class AgentSystemRunner:
         ref: str | None = None,
         selected_agents: Sequence[str] | None = None,
         execution_mode: AgentExecutionMode = "auto",
+        execution_session: ExecutionSession | None = None,
+        execution_selection: ExecutionBackendSelection | None = None,
         on_agent_result: AgentResultCallback | None = None,
     ) -> AgentRunResult:
         normalized = self._normalize_request(
@@ -130,12 +135,18 @@ class AgentSystemRunner:
             execution_mode=execution_mode,
         )
 
+        base_metadata: dict[str, Any] = {"execution_mode": normalized.execution_mode}
+        if execution_selection is not None:
+            base_metadata["execution_backend"] = execution_selection.to_dict()
+        if execution_session is not None:
+            base_metadata["execution_session"] = execution_session
+
         base_context = AgentContext(
             audit_id=normalized.audit_id,
             repo_url=normalized.repo_url,
             repo_path=normalized.repo_path,
             ref=normalized.ref,
-            metadata={"execution_mode": normalized.execution_mode},
+            metadata=base_metadata,
         )
 
         agent_results: list[AgentResult] = []
@@ -149,6 +160,7 @@ class AgentSystemRunner:
             return self._finalize_result(
                 request=normalized,
                 status="failed",
+                execution_selection=execution_selection,
                 repo_map=None,
                 work_plan=None,
                 agent_results=agent_results,
@@ -166,6 +178,7 @@ class AgentSystemRunner:
             return self._finalize_result(
                 request=normalized,
                 status="failed",
+                execution_selection=execution_selection,
                 repo_map=repo_map,
                 work_plan=None,
                 agent_results=agent_results,
@@ -199,6 +212,7 @@ class AgentSystemRunner:
         return self._finalize_result(
             request=normalized,
             status=self._overall_status(agent_results),
+            execution_selection=execution_selection,
             repo_map=repo_map,
             work_plan=work_plan,
             agent_results=agent_results,
@@ -233,7 +247,10 @@ class AgentSystemRunner:
             agent = self.registry.get(agent_name)
         except AgentRegistryError as exc:
             return AgentResult(agent_name=agent_name, status="failed", summary=str(exc))
-        return await agent.run(context)
+        try:
+            return await agent.run(context)
+        except Exception as exc:
+            return self._failed_agent_result(agent_name, exc)
 
     async def _run_optional_agent(self, agent_name: str, context: AgentContext) -> AgentResult:
         agent = self.registry.maybe_get(agent_name)
@@ -243,7 +260,10 @@ class AgentSystemRunner:
                 status="skipped",
                 summary="Skipped because the selected agent is not registered.",
             )
-        return await agent.run(context)
+        try:
+            return await agent.run(context)
+        except Exception as exc:
+            return self._failed_agent_result(agent_name, exc)
 
     def _extract_repo_map(self, result: AgentResult) -> RepoMap | None:
         raw = result.metadata.get("repo_map")
@@ -297,6 +317,7 @@ class AgentSystemRunner:
         *,
         request: AgentRunRequest,
         status: AgentRunStatus,
+        execution_selection: ExecutionBackendSelection | None,
         repo_map: RepoMap | None,
         work_plan: RepoWorkPlan | None,
         agent_results: Sequence[AgentResult],
@@ -319,6 +340,7 @@ class AgentSystemRunner:
             audit_id=request.audit_id,
             ref=request.ref,
             execution_mode=request.execution_mode,
+            execution_backend=execution_selection.to_dict() if execution_selection is not None else None,
             selected_agents=self._reported_selected_agents(request, work_plan),
             executed_agents=[
                 result.agent_name
@@ -378,6 +400,16 @@ class AgentSystemRunner:
         if callback is not None:
             callback(result)
 
+    @staticmethod
+    def _failed_agent_result(agent_name: str, error: Exception) -> AgentResult:
+        message = str(error).strip() or f"{type(error).__name__} raised without a message."
+        return AgentResult(
+            agent_name=agent_name,
+            status="failed",
+            summary=f"{agent_name} failed during execution: {message}",
+            metadata={"error_type": type(error).__name__},
+        )
+
 
 async def run_agent_system(
     request: AgentRunRequest | None = None,
@@ -389,6 +421,8 @@ async def run_agent_system(
     ref: str | None = None,
     selected_agents: Sequence[str] | None = None,
     execution_mode: AgentExecutionMode = "auto",
+    execution_session: ExecutionSession | None = None,
+    execution_selection: ExecutionBackendSelection | None = None,
     on_agent_result: AgentResultCallback | None = None,
 ) -> AgentRunResult:
     return await agent_system_runner.run(
@@ -399,6 +433,8 @@ async def run_agent_system(
         ref=ref,
         selected_agents=selected_agents,
         execution_mode=execution_mode,
+        execution_session=execution_session,
+        execution_selection=execution_selection,
         on_agent_result=on_agent_result,
     )
 

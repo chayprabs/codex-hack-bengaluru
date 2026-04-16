@@ -138,7 +138,7 @@ class AuditService:
             snapshot.append(
                 build_audit_complete_event(
                     audit.id,
-                    AuditCompleteEvent.from_audit(audit),
+                    AuditCompleteEvent.from_audit(audit, message=audit.completion_message),
                     event_id=f"{audit.id}:snapshot:complete",
                 )
             )
@@ -154,6 +154,7 @@ audit_service = AuditService(
             audit,
             primary_demo_repo_url=settings.demo_repo_url,
         ),
+        execution_backend=settings.audit_execution_backend,
     ),
     demo_repo_url=settings.demo_repo_url,
 )

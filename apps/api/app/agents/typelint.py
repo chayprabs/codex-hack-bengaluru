@@ -15,12 +15,15 @@ from .types import AgentContext, AgentResult, FindingSeverity
 from .utils import (
     AgentExecutionCheck,
     get_assignment,
+    get_execution_backend,
     load_repo_map,
     normalize_assignment_targets,
+    result_status_for_execution_checks,
     resolve_repo_root,
+    run_context_command,
     trim_output,
 )
-from ..sandbox import CommandResult, SandboxCommandError, run_command
+from ..sandbox import CommandResult, SandboxCommandError
 
 TypeLintFindingKind = Literal[
     "invalid_manifest",
@@ -68,6 +71,7 @@ class TypeLintFinding(BaseModel):
 class TypeLintReport(BaseModel):
     root_path: str
     project_roots: list[str] = Field(default_factory=list)
+    execution_backend: dict[str, Any] | None = None
     checks: list[AgentExecutionCheck] = Field(default_factory=list)
     findings: list[TypeLintFinding] = Field(default_factory=list)
 
@@ -111,7 +115,11 @@ class TypeLintAgent(BaseAgent):
             for item in report.findings
         ]
 
-        status = "completed" if report.project_roots else "skipped"
+        status = result_status_for_execution_checks(
+            report.checks,
+            has_targets=bool(report.project_roots),
+            finding_count=len(findings),
+        )
         return self.result(
             status=status,
             summary=self._build_summary(report),
@@ -125,13 +133,14 @@ class TypeLintAgent(BaseAgent):
         report = TypeLintReport(
             root_path=str(root),
             project_roots=[project.display_path for project in projects],
+            execution_backend=get_execution_backend(context),
         )
 
         for project in projects:
             if project.kind == "node":
-                findings, checks = self._analyze_node_project(project)
+                findings, checks = self._analyze_node_project(context, project)
             else:
-                findings, checks = self._analyze_python_project(project)
+                findings, checks = self._analyze_python_project(context, project)
             report.findings.extend(findings)
             report.checks.extend(checks)
 
@@ -215,6 +224,7 @@ class TypeLintAgent(BaseAgent):
 
     def _analyze_node_project(
         self,
+        context: AgentContext,
         project: _ProjectRoot,
     ) -> tuple[list[TypeLintFinding], list[AgentExecutionCheck]]:
         findings: list[TypeLintFinding] = []
@@ -302,6 +312,7 @@ class TypeLintAgent(BaseAgent):
 
         if lint_script is not None:
             check, result = self._run_check(
+                context=context,
                 label=f"{project.display_path}:lint",
                 command=self._node_script_command(package_manager, "lint"),
                 cwd=project.path,
@@ -311,6 +322,7 @@ class TypeLintAgent(BaseAgent):
                 findings.append(self._node_failure_finding(project, "lint", result))
         elif has_eslint:
             check, result = self._run_check(
+                context=context,
                 label=f"{project.display_path}:lint",
                 command=["npx", "--no-install", "eslint", "."],
                 cwd=project.path,
@@ -321,6 +333,7 @@ class TypeLintAgent(BaseAgent):
 
         if type_script_name is not None:
             check, result = self._run_check(
+                context=context,
                 label=f"{project.display_path}:typecheck",
                 command=self._node_script_command(package_manager, type_script_name),
                 cwd=project.path,
@@ -330,6 +343,7 @@ class TypeLintAgent(BaseAgent):
                 findings.append(self._node_failure_finding(project, "typecheck", result))
         elif has_tsconfig and has_typescript:
             check, result = self._run_check(
+                context=context,
                 label=f"{project.display_path}:typecheck",
                 command=["npx", "--no-install", "tsc", "--noEmit", "-p", "tsconfig.json"],
                 cwd=project.path,
@@ -342,6 +356,7 @@ class TypeLintAgent(BaseAgent):
 
     def _analyze_python_project(
         self,
+        context: AgentContext,
         project: _ProjectRoot,
     ) -> tuple[list[TypeLintFinding], list[AgentExecutionCheck]]:
         findings: list[TypeLintFinding] = []
@@ -373,7 +388,7 @@ class TypeLintAgent(BaseAgent):
         has_mypy = "mypy" in dependencies or "mypy" in tool
 
         if has_ruff:
-            if not self._python_module_available(project.path, "ruff"):
+            if not self._python_module_available(context, project.path, "ruff"):
                 checks.append(
                     self._skipped_check(
                         label=f"{project.display_path}:ruff",
@@ -383,6 +398,7 @@ class TypeLintAgent(BaseAgent):
                 )
             else:
                 check, result = self._run_check(
+                    context=context,
                     label=f"{project.display_path}:ruff",
                     command=["python", "-m", "ruff", "check", *source_paths],
                     cwd=project.path,
@@ -392,7 +408,7 @@ class TypeLintAgent(BaseAgent):
                     findings.append(self._python_failure_finding(project, "lint", result))
 
         if has_mypy:
-            if not self._python_module_available(project.path, "mypy"):
+            if not self._python_module_available(context, project.path, "mypy"):
                 checks.append(
                     self._skipped_check(
                         label=f"{project.display_path}:mypy",
@@ -402,6 +418,7 @@ class TypeLintAgent(BaseAgent):
                 )
             else:
                 check, result = self._run_check(
+                    context=context,
                     label=f"{project.display_path}:mypy",
                     command=["python", "-m", "mypy", *source_paths],
                     cwd=project.path,
@@ -480,8 +497,9 @@ class TypeLintAgent(BaseAgent):
         paths = [name for name in PYTHON_SOURCE_DIRS if (project_root / name).is_dir()]
         return paths or ["."]
 
-    def _python_module_available(self, cwd: Path, module_name: str) -> bool:
+    def _python_module_available(self, context: AgentContext, cwd: Path, module_name: str) -> bool:
         check, result = self._run_check(
+            context=context,
             label=f"{cwd.name}:probe:{module_name}",
             command=["python", "-c", f"import {module_name}"],
             cwd=cwd,
@@ -557,6 +575,7 @@ class TypeLintAgent(BaseAgent):
     def _run_check(
         self,
         *,
+        context: AgentContext,
         label: str,
         command: list[str],
         cwd: Path,
@@ -564,7 +583,8 @@ class TypeLintAgent(BaseAgent):
     ) -> tuple[AgentExecutionCheck, CommandResult | None]:
         resolved_command = self._resolve_command(command)
         try:
-            result = run_command(
+            result = run_context_command(
+                context,
                 resolved_command,
                 cwd=cwd,
                 timeout_seconds=self.command_timeout_seconds,
@@ -665,11 +685,20 @@ class TypeLintAgent(BaseAgent):
 
     def _build_summary(self, report: TypeLintReport) -> str:
         failed_checks = sum(1 for check in report.checks if check.status == "failed")
+        error_checks = sum(1 for check in report.checks if check.status == "error")
         skipped_checks = sum(1 for check in report.checks if check.status == "skipped")
         if not report.project_roots:
             return "No typed or lintable project roots were selected for typelint analysis."
-        return (
+        summary = (
             f"Checked {len(report.project_roots)} project roots with {len(report.checks)} lint/type checks, "
             f"found {len(report.findings)} typelint findings, {failed_checks} failed checks, "
-            f"and {skipped_checks} skipped checks."
+            f"{error_checks} execution errors, and {skipped_checks} skipped checks."
         )
+        fallback_reason = (
+            str(report.execution_backend.get("fallback_reason"))
+            if report.execution_backend and report.execution_backend.get("fallback_reason")
+            else ""
+        )
+        if fallback_reason:
+            return f"{summary} {fallback_reason}"
+        return summary

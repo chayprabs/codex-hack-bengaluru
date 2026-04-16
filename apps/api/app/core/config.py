@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -16,6 +17,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./trustlayer.db"
     demo_repo_url: str = "https://github.com/example/demo-repo"
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+    audit_execution_backend: Literal["auto", "local", "docker"] = "auto"
 
     model_config = SettingsConfigDict(
         env_file=(API_DIR / ".env", ROOT_DIR / ".env"),

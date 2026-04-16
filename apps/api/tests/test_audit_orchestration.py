@@ -24,7 +24,7 @@ from app.agents import (
 )
 from app.db import DatabaseRuntime
 from app.models import Audit
-from app.sandbox import AcquiredRepository, RepositoryAcquisitionError, create_workspace
+from app.sandbox import AcquiredRepository, ExecutionLayerError, RepositoryAcquisitionError, create_workspace
 from app.services.agent_runner import AgentRunResult, AgentRunResultSummary
 from app.services.audit_runner import AuditRunner
 from app.services.scoring import scoring_service
@@ -53,6 +53,8 @@ class StubLiveAgentRunner:
         ref: str | None = None,
         selected_agents=None,
         execution_mode: str = "auto",
+        execution_session=None,
+        execution_selection=None,
         on_agent_result=None,
     ) -> AgentRunResult:
         self.calls.append(
@@ -61,6 +63,8 @@ class StubLiveAgentRunner:
                 "repo_url": repo_url,
                 "audit_id": audit_id,
                 "execution_mode": execution_mode,
+                "execution_session": execution_session,
+                "execution_selection": execution_selection,
             }
         )
 
@@ -251,6 +255,11 @@ class AuditOrchestrationTests(unittest.TestCase):
         self.assertEqual(len(self.events.completions), 1)
         self.assertIsNone(self.events.completions[0][1].message)
         self.assertEqual(live_agent_runner.calls[0]["repo_path"], str(repo_path))
+        self.assertIsNotNone(live_agent_runner.calls[0]["execution_session"])
+        self.assertEqual(
+            live_agent_runner.calls[0]["execution_selection"].selected_backend,
+            "local",
+        )
         self.assertFalse(workspace.root.exists())
 
     def test_live_audit_completes_with_limitation_when_workspace_fails(self) -> None:
@@ -285,6 +294,45 @@ class AuditOrchestrationTests(unittest.TestCase):
         self.assertEqual(final_audit.findings[0].title, "Repository workspace could not be acquired")
         self.assertLess(final_audit.score, 100)
         self.assertEqual(len(self.events.completions), 1)
+        self.assertIn("limited coverage", self.events.completions[0][1].message or "")
+
+    def test_live_audit_falls_back_to_no_execution_when_backend_setup_fails(self) -> None:
+        workspace = create_workspace(prefix="audit-exec-fallback-")
+        self.addCleanup(workspace.cleanup)
+        repo_path = workspace.mkdir("repo")
+        (repo_path / ".git").mkdir()
+        (repo_path / "app").mkdir()
+        (repo_path / "app" / "main.py").write_text("from fastapi import FastAPI\napp = FastAPI()\n", encoding="utf-8")
+        (repo_path / "package.json").write_text('{"name":"example","version":"1.0.0"}', encoding="utf-8")
+
+        acquired_repository = AcquiredRepository(
+            workspace=workspace,
+            repo_path=repo_path,
+            source="https://github.com/acme/example",
+            source_kind="github_url",
+            repo_name="example",
+            owns_workspace=True,
+        )
+        live_agent_runner = StubLiveAgentRunner()
+        runner = AuditRunner(
+            repository=self.repository,
+            agent_runner=live_agent_runner,
+            repository_acquirer=lambda _: acquired_repository,
+            execution_backend_resolver=lambda **_: (_ for _ in ()).throw(
+                ExecutionLayerError("invalid_execution_mode", "Sandbox backend resolution failed.")
+            ),
+        )
+        audit = self._seed_audit(runner, "https://github.com/acme/example")
+
+        runner._run_lifecycle(audit.id, mode="live")
+
+        final_audit = self.repository.get_audit(audit.id)
+        self.assertIsNotNone(final_audit)
+        assert final_audit is not None
+        self.assertEqual(final_audit.status, "completed")
+        self.assertEqual(live_agent_runner.calls[0]["execution_mode"], "no_execution")
+        self.assertIsNone(live_agent_runner.calls[0]["execution_selection"])
+        self.assertEqual(final_audit.findings[0].title, "Sandbox execution backend could not be prepared")
         self.assertIn("limited coverage", self.events.completions[0][1].message or "")
 
     @staticmethod
