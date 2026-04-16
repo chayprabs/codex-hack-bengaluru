@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { getAuditStreamUrl } from "@/lib/api";
+import { getApiErrorMessage, getAudit, getAuditStreamUrl } from "@/lib/api";
 import type {
   AgentStatusEvent,
   Audit,
@@ -16,6 +16,7 @@ type UseAuditStreamOptions = {
   auditId: string;
   initialAudit: Audit;
   reconnectDelayMs?: number;
+  pollIntervalMs?: number;
 };
 
 type UseAuditStreamResult = {
@@ -27,6 +28,7 @@ type UseAuditStreamResult = {
 };
 
 const DEFAULT_RECONNECT_DELAY_MS = 3_000;
+const DEFAULT_POLL_INTERVAL_MS = 5_000;
 
 function timestampValue(value: string | null | undefined) {
   if (!value) {
@@ -43,6 +45,14 @@ function keepLatestTimestamp(current: string, incoming: string | null | undefine
   }
 
   return timestampValue(incoming) >= timestampValue(current) ? incoming : current;
+}
+
+function isTerminalStatus(status: Audit["status"]) {
+  return status === "completed" || status === "failed";
+}
+
+function keepNewestAudit(current: Audit, incoming: Audit) {
+  return timestampValue(incoming.updated_at) >= timestampValue(current.updated_at) ? incoming : current;
 }
 
 function mergeAgentStatus(audit: Audit, event: AgentStatusEvent) {
@@ -141,43 +151,47 @@ export function useAuditStream({
   auditId,
   initialAudit,
   reconnectDelayMs = DEFAULT_RECONNECT_DELAY_MS,
+  pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
 }: UseAuditStreamOptions): UseAuditStreamResult {
   const [audit, setAudit] = useState(initialAudit);
   const [latestScoreUpdate, setLatestScoreUpdate] = useState<ScoreUpdateEvent | null>(null);
   const [completionEvent, setCompletionEvent] = useState<AuditCompleteEvent | null>(() => toCompletionEvent(initialAudit));
   const [connectionState, setConnectionState] = useState<AuditStreamConnectionState>(
-    initialAudit.status === "completed" || initialAudit.status === "failed" ? "closed" : "connecting",
+    isTerminalStatus(initialAudit.status) ? "closed" : "connecting",
   );
   const [streamError, setStreamError] = useState<string | null>(null);
 
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     setAudit(initialAudit);
     setLatestScoreUpdate(null);
     setCompletionEvent(toCompletionEvent(initialAudit));
     setStreamError(null);
-    setConnectionState(initialAudit.status === "completed" || initialAudit.status === "failed" ? "closed" : "connecting");
+    setConnectionState(isTerminalStatus(initialAudit.status) ? "closed" : "connecting");
   }, [initialAudit]);
 
   useEffect(() => {
-    if (initialAudit.status === "completed" || initialAudit.status === "failed") {
-      return;
-    }
-
-    if (typeof window === "undefined" || typeof EventSource === "undefined") {
-      setConnectionState("closed");
-      setStreamError("Live updates are not supported in this browser.");
+    if (isTerminalStatus(initialAudit.status)) {
       return;
     }
 
     let disposed = false;
     let source: EventSource | null = null;
+    const canUseEventSource = typeof window !== "undefined" && typeof EventSource !== "undefined";
 
     const clearReconnectTimer = () => {
       if (reconnectTimerRef.current) {
         clearTimeout(reconnectTimerRef.current);
         reconnectTimerRef.current = null;
+      }
+    };
+
+    const clearPollTimer = () => {
+      if (pollTimerRef.current) {
+        clearTimeout(pollTimerRef.current);
+        pollTimerRef.current = null;
       }
     };
 
@@ -188,8 +202,19 @@ export function useAuditStream({
       }
     };
 
-    const scheduleReconnect = () => {
+    const schedulePoll = (delay = pollIntervalMs) => {
       if (disposed) {
+        return;
+      }
+
+      clearPollTimer();
+      pollTimerRef.current = setTimeout(() => {
+        void pollAudit();
+      }, delay);
+    };
+
+    const scheduleReconnect = () => {
+      if (disposed || !canUseEventSource) {
         return;
       }
 
@@ -201,14 +226,52 @@ export function useAuditStream({
       }, reconnectDelayMs);
     };
 
+    const applySnapshot = (snapshot: Audit) => {
+      setAudit((current) => keepNewestAudit(current, snapshot));
+
+      if (isTerminalStatus(snapshot.status)) {
+        setCompletionEvent(toCompletionEvent(snapshot));
+        setConnectionState("closed");
+        setStreamError(null);
+        clearReconnectTimer();
+        clearPollTimer();
+        closeSource();
+        return;
+      }
+
+      if (!source) {
+        schedulePoll();
+      }
+    };
+
+    const pollAudit = async () => {
+      try {
+        const snapshot = await getAudit(auditId);
+
+        if (disposed) {
+          return;
+        }
+
+        applySnapshot(snapshot);
+      } catch (error) {
+        if (disposed) {
+          return;
+        }
+
+        setStreamError(getApiErrorMessage(error));
+        setConnectionState((current) => (current === "reconnecting" ? current : "polling"));
+        schedulePoll();
+      }
+    };
+
     const connect = () => {
-      if (disposed) {
+      if (disposed || !canUseEventSource) {
         return;
       }
 
       clearReconnectTimer();
       closeSource();
-      setConnectionState((current) => (current === "live" ? "reconnecting" : "connecting"));
+      setConnectionState((current) => (current === "reconnecting" ? current : "connecting"));
 
       const nextSource = new EventSource(getAuditStreamUrl(auditId));
       source = nextSource;
@@ -220,6 +283,7 @@ export function useAuditStream({
 
         setConnectionState("live");
         setStreamError(null);
+        clearPollTimer();
       };
 
       nextSource.addEventListener("agent_status", (event) => {
@@ -261,6 +325,7 @@ export function useAuditStream({
         setConnectionState("closed");
         setStreamError(null);
         clearReconnectTimer();
+        clearPollTimer();
         closeSource();
       });
 
@@ -270,19 +335,34 @@ export function useAuditStream({
         }
 
         closeSource();
-        setStreamError("Live updates disconnected. Reconnecting to the audit stream.");
+        setStreamError("Live updates disconnected. Refreshing the latest snapshot while the stream reconnects.");
+        schedulePoll();
         scheduleReconnect();
       };
     };
 
+    if (!canUseEventSource) {
+      setConnectionState("polling");
+      setStreamError("Live updates are unavailable in this browser. Refreshing the audit snapshot instead.");
+      schedulePoll();
+      return () => {
+        disposed = true;
+        clearReconnectTimer();
+        clearPollTimer();
+        closeSource();
+      };
+    }
+
     connect();
+    schedulePoll(pollIntervalMs);
 
     return () => {
       disposed = true;
       clearReconnectTimer();
+      clearPollTimer();
       closeSource();
     };
-  }, [auditId, initialAudit.status, reconnectDelayMs]);
+  }, [auditId, initialAudit.status, pollIntervalMs, reconnectDelayMs]);
 
   return {
     audit,

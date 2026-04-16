@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TypeAlias
 
-from .audit import AgentStatus, Audit, AuditState, AuditStreamEventName, Finding
+from .audit import AgentStatus, Audit, AuditState, Finding
 from .common import StrictModel
 
 

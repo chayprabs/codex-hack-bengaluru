@@ -49,12 +49,18 @@ export function AgentCard({
   }
 
   return (
-    <article className={cn("rounded-[1.5rem] border border-slate-200 bg-white/90 p-5 shadow-sm", className)}>
+    <article
+      className={cn("flex h-full flex-col rounded-[1.5rem] border border-slate-200 bg-white/90 p-5 shadow-sm", className)}
+    >
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Agent lane</p>
+          <div className="flex flex-wrap items-center gap-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Agent lane</p>
+            <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+              telemetry
+            </span>
+          </div>
           <h3 className="mt-3 font-mono text-lg font-semibold text-slate-950">{agent.name}</h3>
-          <p className="mt-2 text-sm leading-6 text-slate-600">{agent.message}</p>
         </div>
 
         <div className="flex items-center gap-3">
@@ -65,17 +71,20 @@ export function AgentCard({
         </div>
       </div>
 
+      <div className="mt-5 flex-1 rounded-[1.25rem] border border-slate-200 bg-slate-50/90 px-4 py-4">
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Latest note</p>
+        <p className="mt-3 text-sm leading-6 text-slate-700">{agent.message || "No status note has been published yet."}</p>
+      </div>
+
       {showTimestamp ? (
-        <dl className="mt-5 flex flex-wrap gap-3 text-sm text-slate-600">
-          <div className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5">
-            <dt className="sr-only">Updated</dt>
-            <dd>
-              Updated <span className="font-mono">{formatRelativeTime(agent.updated_at)}</span>
-            </dd>
+        <dl className="mt-5 grid gap-3 text-sm text-slate-600 sm:grid-cols-2">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+            <dt className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Updated</dt>
+            <dd className="mt-2 font-mono text-sm font-semibold text-slate-950">{formatRelativeTime(agent.updated_at)}</dd>
           </div>
-          <div className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5">
-            <dt className="sr-only">Display name</dt>
-            <dd className="font-mono">{titleCase(agent.status)}</dd>
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+            <dt className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">State</dt>
+            <dd className="mt-2 font-mono text-sm font-semibold text-slate-950">{titleCase(agent.status)}</dd>
           </div>
         </dl>
       ) : null}

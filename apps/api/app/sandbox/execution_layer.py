@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
-from os import PathLike
-from pathlib import Path
 import shutil
 from typing import Any, Literal
 
@@ -17,6 +15,15 @@ ExecutionMode = Literal["auto", "local", "docker"]
 ExecutionBackendKind = Literal["local", "docker"]
 
 _USE_SESSION_DEFAULT = object()
+
+__all__ = [
+    "ExecutionBackendSelection",
+    "ExecutionLayer",
+    "ExecutionLayerError",
+    "ExecutionSession",
+    "acquire_execution_workspace",
+    "resolve_execution_backend",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,13 +80,6 @@ class ExecutionSession:
         allowed_executables: Collection[str] | None | object = _USE_SESSION_DEFAULT,
     ) -> CommandResult:
         """Run a command inside this execution session."""
-
-        if self.backend != "local":
-            raise ExecutionLayerError(
-                "unsupported_backend",
-                "Selected execution backend is not implemented yet.",
-                details={"backend": self.backend},
-            )
 
         resolved_allowed = (
             self.default_allowed_executables
@@ -177,7 +177,12 @@ def resolve_execution_backend(
     mode: ExecutionMode = "auto",
     docker_image: str | None = None,
 ) -> ExecutionBackendSelection:
-    """Resolve the requested backend into the currently supported backend."""
+    """Resolve the requested backend into the best currently supported backend.
+
+    The sandbox always returns a local backend today. Docker requests are kept
+    explicit in the selection metadata so callers can surface the fallback and
+    adopt a Docker backend later without changing their interface.
+    """
 
     normalized_mode = _validate_execution_mode(mode)
     docker_cli_path = shutil.which("docker")

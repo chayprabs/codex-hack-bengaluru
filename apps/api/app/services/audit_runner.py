@@ -3,7 +3,7 @@ from __future__ import annotations
 from threading import Lock, Thread
 from time import sleep
 
-from ..db import AuditRepository, audit_repository
+from ..db import AuditRepository
 from ..core.sse import (
     publish_agent_status,
     publish_audit_complete,
@@ -59,7 +59,11 @@ class AuditRunner:
 
     def _run_lifecycle(self, audit_id: str) -> None:
         try:
-            for step in self.plan_builder():
+            audit = self.repository.get_audit(audit_id)
+            if audit is None:
+                return
+
+            for step in self.plan_builder(audit):
                 sleep(step.delay_seconds)
                 updated_audit = self._apply_step(audit_id, step)
                 if updated_audit is None:
@@ -201,6 +205,3 @@ class AuditRunner:
 
         audit.agents = [*agents, agent_update]
         return agent_update
-
-
-audit_runner = AuditRunner(repository=audit_repository)

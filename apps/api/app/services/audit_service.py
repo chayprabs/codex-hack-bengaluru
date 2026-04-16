@@ -22,7 +22,8 @@ from ..models import (
     ScoreUpdateEvent,
     WallEntry,
 )
-from .audit_runner import AuditRunner, audit_runner
+from .demo_data import build_demo_lifecycle_steps, build_seed_demo_audits
+from .audit_runner import AuditRunner
 
 
 class DemoAuditConfigurationError(RuntimeError):
@@ -90,7 +91,11 @@ class AuditService:
         if self.repository.has_audits():
             return
 
-        self.create_demo_audit()
+        for seeded_audit in build_seed_demo_audits(
+            primary_demo_repo_url=self.demo_repo_url,
+            initial_agents=self.runner.build_initial_agents(),
+        ):
+            self.repository.create_audit(seeded_audit)
 
     def _build_stream_snapshot(self, audit: Audit) -> list[SSEMessage]:
         snapshot: list[SSEMessage] = []
@@ -140,6 +145,12 @@ class AuditService:
 
 audit_service = AuditService(
     repository=audit_repository,
-    runner=audit_runner,
+    runner=AuditRunner(
+        repository=audit_repository,
+        plan_builder=lambda audit: build_demo_lifecycle_steps(
+            audit,
+            primary_demo_repo_url=settings.demo_repo_url,
+        ),
+    ),
     demo_repo_url=settings.demo_repo_url,
 )

@@ -31,6 +31,22 @@ def get_sandbox_root(base_dir: PathValue | None = None, *, create: bool = True) 
     return root.resolve(strict=False)
 
 
+def resolve_path(path: PathValue, *, root: PathValue | None = None) -> Path:
+    """Resolve a path, optionally constraining it to remain under ``root``.
+
+    Relative paths are interpreted from ``root`` when provided. Absolute paths
+    must still remain within ``root`` after normalization.
+    """
+
+    raw_path = as_path(path).expanduser()
+    if root is None:
+        return raw_path.resolve(strict=False)
+
+    resolved_root = as_path(root).resolve(strict=False)
+    candidate = raw_path if raw_path.is_absolute() else resolved_root / raw_path
+    return ensure_within(resolved_root, candidate)
+
+
 def ensure_within(root: PathValue, candidate: PathValue) -> Path:
     """Validate that ``candidate`` stays under ``root`` after normalization."""
 

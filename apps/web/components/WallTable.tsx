@@ -2,11 +2,11 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 
 import type { WallEntry } from "@/lib/types";
-import { formatDateTime, formatRelativeTime } from "@/lib/format";
+import { formatDateTime, formatRelativeTime, formatScore } from "@/lib/format";
 import { cn, formatSeverityLabel, repoLabelFromUrl, shortId } from "@/lib/utils";
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorState } from "@/components/ErrorState";
-import { StatusBadge, toneFromSeverity } from "@/components/StatusBadge";
+import { StatusBadge, toneFromSeverity, type StatusBadgeTone } from "@/components/StatusBadge";
 
 type WallTableProps = {
   entries?: WallEntry[];
@@ -18,6 +18,9 @@ type WallTableProps = {
   emptyDescription?: string;
   getAuditHref?: (entry: WallEntry) => string | null | undefined;
   renderActions?: (entry: WallEntry) => ReactNode;
+  rankEntries?: boolean;
+  getTrustScore?: (entry: WallEntry) => number | null | undefined;
+  getTrustTier?: (entry: WallEntry) => { label: string; tone: StatusBadgeTone } | null | undefined;
   className?: string;
 };
 
@@ -48,9 +51,18 @@ export function WallTable({
   emptyDescription = "Findings will appear here once audits start reporting issues.",
   getAuditHref,
   renderActions,
+  rankEntries = false,
+  getTrustScore,
+  getTrustTier,
   className,
 }: Readonly<WallTableProps>) {
   const hasActions = Boolean(getAuditHref || renderActions);
+  const hasTrustSignals = entries.some((entry) => {
+    const trustScore = getTrustScore?.(entry);
+    const trustTier = getTrustTier?.(entry);
+
+    return (trustScore !== null && trustScore !== undefined) || Boolean(trustTier);
+  });
 
   return (
     <section className={cn("rounded-[1.75rem] border border-slate-200 bg-white/90 p-5 shadow-sm sm:p-6", className)}>
@@ -80,23 +92,44 @@ export function WallTable({
           <>
             <div className="md:hidden">
               <ul className="space-y-3" aria-label="Wall entries">
-                {entries.map((entry) => {
+                {entries.map((entry, index) => {
                   const href = getAuditHref?.(entry);
+                  const trustScore = getTrustScore?.(entry);
+                  const trustTier = getTrustTier?.(entry);
 
                   return (
                     <li key={`${entry.audit_id}-${entry.title}-${entry.created_at}`}>
                       <article className="rounded-[1.5rem] border border-slate-200 bg-slate-50/85 p-4">
                         <div className="flex flex-wrap items-center gap-3">
+                          {rankEntries ? (
+                            <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-slate-600">
+                              #{index + 1}
+                            </span>
+                          ) : null}
                           <StatusBadge tone={toneFromSeverity(entry.severity)}>
                             {formatSeverityLabel(entry.severity)}
                           </StatusBadge>
+                          {trustTier ? <StatusBadge tone={trustTier.tone}>{trustTier.label}</StatusBadge> : null}
                           <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-slate-600">
                             <span className="font-mono">{shortId(entry.audit_id, 10)}</span>
                           </span>
                         </div>
 
                         <h3 className="mt-4 text-lg font-semibold text-slate-950">{entry.title}</h3>
-                        <dl className="mt-4 space-y-2 text-sm text-slate-600">
+                        <dl
+                          className={cn(
+                            "mt-4 grid gap-3 text-sm text-slate-600",
+                            trustScore !== null && trustScore !== undefined ? "sm:grid-cols-2" : "",
+                          )}
+                        >
+                          {trustScore !== null && trustScore !== undefined ? (
+                            <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                              <dt className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Trust score</dt>
+                              <dd className="mt-2 font-mono text-2xl font-semibold text-slate-950">
+                                {formatScore(trustScore)}
+                              </dd>
+                            </div>
+                          ) : null}
                           <div>
                             <dt className="font-semibold text-slate-500">Repository</dt>
                             <dd className="mt-1 font-mono text-slate-900">{repoLabelFromUrl(entry.repo_url)}</dd>
@@ -132,9 +165,19 @@ export function WallTable({
                 <caption className="sr-only">Latest findings across audits</caption>
                 <thead className="bg-slate-50/90">
                   <tr className="text-left">
+                    {rankEntries ? (
+                      <th scope="col" className="px-4 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                        Rank
+                      </th>
+                    ) : null}
                     <th scope="col" className="px-4 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
                       Finding
                     </th>
+                    {hasTrustSignals ? (
+                      <th scope="col" className="px-4 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                        Trust
+                      </th>
+                    ) : null}
                     <th scope="col" className="px-4 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
                       Repository
                     </th>
@@ -152,11 +195,20 @@ export function WallTable({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 bg-white">
-                  {entries.map((entry) => {
+                  {entries.map((entry, index) => {
                     const href = getAuditHref?.(entry);
+                    const trustScore = getTrustScore?.(entry);
+                    const trustTier = getTrustTier?.(entry);
 
                     return (
                       <tr key={`${entry.audit_id}-${entry.title}-${entry.created_at}`} className="align-top">
+                        {rankEntries ? (
+                          <td className="px-4 py-4">
+                            <span className="inline-flex h-10 min-w-10 items-center justify-center rounded-full border border-slate-200 bg-slate-50 px-3 font-mono text-sm font-semibold text-slate-700">
+                              #{index + 1}
+                            </span>
+                          </td>
+                        ) : null}
                         <td className="px-4 py-4">
                           <div className="flex flex-wrap items-center gap-3">
                             <StatusBadge tone={toneFromSeverity(entry.severity)}>
@@ -170,6 +222,18 @@ export function WallTable({
                             </div>
                           </div>
                         </td>
+                        {hasTrustSignals ? (
+                          <td className="px-4 py-4">
+                            {trustScore !== null && trustScore !== undefined ? (
+                              <div className="space-y-2">
+                                <p className="font-mono text-2xl font-semibold text-slate-950">{formatScore(trustScore)}</p>
+                                {trustTier ? <StatusBadge tone={trustTier.tone}>{trustTier.label}</StatusBadge> : null}
+                              </div>
+                            ) : (
+                              <span className="font-mono text-sm text-slate-500">N/A</span>
+                            )}
+                          </td>
+                        ) : null}
                         <td className="px-4 py-4 font-mono text-sm text-slate-700">{repoLabelFromUrl(entry.repo_url)}</td>
                         <td className="px-4 py-4 font-mono text-sm text-slate-700">{shortId(entry.audit_id, 10)}</td>
                         <td className="px-4 py-4 font-mono text-sm text-slate-700">{formatDateTime(entry.created_at)}</td>

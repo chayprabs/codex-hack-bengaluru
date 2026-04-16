@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from os import PathLike, environ
+from os import PathLike
 from pathlib import Path
 import re
 import shutil
-import subprocess
 from typing import Any, Literal
 from urllib.parse import urlparse
 
 from .cleanup import cleanup_workspace
+from .executor import run_command
 from .paths import DEFAULT_WORKSPACE_PREFIX, PathValue, as_path
 from .workspace import SandboxWorkspace, create_workspace
 
@@ -205,43 +205,42 @@ def clone_public_github_repo(
             repo_ref.clone_url,
             str(target_path),
         ]
-        completed = subprocess.run(
+        completed = run_command(
             command,
             cwd=active_workspace.root,
-            capture_output=True,
-            text=True,
-            timeout=timeout_seconds,
-            check=False,
-            env=_build_git_environment(),
+            workspace=active_workspace,
+            timeout_seconds=timeout_seconds,
+            env=_build_git_environment_overrides(),
+            allowed_executables={git_executable, "git"},
         )
     except RepositoryAcquisitionError:
         _cleanup_failed_acquisition(active_workspace, owns_workspace, target_path)
         raise
-    except FileNotFoundError as exc:
+
+    if completed.error_code == "command_not_found":
         _cleanup_failed_acquisition(active_workspace, owns_workspace, target_path)
         raise RepositoryAcquisitionError(
             "git_not_available",
             "Git is not installed or not available on PATH.",
             source=repo_ref.display_url,
             details={"git_executable": git_executable},
-        ) from exc
-    except subprocess.TimeoutExpired as exc:
+        )
+    if completed.error_code == "timeout":
         _cleanup_failed_acquisition(active_workspace, owns_workspace, target_path)
         raise RepositoryAcquisitionError(
             "git_clone_timeout",
             "Git clone timed out before the repository finished downloading.",
             source=repo_ref.display_url,
             details={"timeout_seconds": timeout_seconds},
-        ) from exc
-
-    if completed.returncode != 0:
+        )
+    if not completed.ok:
         _cleanup_failed_acquisition(active_workspace, owns_workspace, target_path)
         raise RepositoryAcquisitionError(
             "git_clone_failed",
             "Git clone failed.",
             source=repo_ref.display_url,
             details={
-                "exit_code": completed.returncode,
+                "exit_code": completed.exit_code,
                 "stderr": _trim_output(completed.stderr),
                 "stdout": _trim_output(completed.stdout),
             },
@@ -414,11 +413,11 @@ def _validate_local_repository(source_path: Path) -> None:
         )
 
 
-def _build_git_environment() -> dict[str, str]:
-    environment = dict(environ)
-    environment["GIT_TERMINAL_PROMPT"] = "0"
-    environment["GCM_INTERACTIVE"] = "Never"
-    return environment
+def _build_git_environment_overrides() -> dict[str, str]:
+    return {
+        "GIT_TERMINAL_PROMPT": "0",
+        "GCM_INTERACTIVE": "Never",
+    }
 
 
 def _trim_output(value: str, *, limit: int = 1000) -> str:

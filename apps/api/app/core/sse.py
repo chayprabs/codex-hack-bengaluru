@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, time
 from itertools import count
 from threading import Lock
-from typing import Any, AsyncIterator, Iterable, Literal, Mapping
+from typing import Any, AsyncIterator, Iterable, Mapping
 
 from fastapi import Request
 from pydantic import BaseModel

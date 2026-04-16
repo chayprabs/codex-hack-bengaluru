@@ -6,7 +6,8 @@ from pydantic import BaseModel, Field, model_validator
 from .utils import new_id, utc_now
 
 FindingSeverity = Literal["low", "medium", "high", "critical"]
-AgentResultStatus = Literal["completed", "failed", "skipped"]
+FindingConfidence = Literal["low", "medium", "high"]
+AgentResultStatus = Literal["completed", "failed", "skipped", "needs_review"]
 
 
 class AgentContext(BaseModel):

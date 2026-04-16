@@ -5,7 +5,6 @@ import {
 } from "@/lib/constants";
 import type {
   Audit,
-  AuditStreamStatus,
   CreateAuditRequest,
   HealthCheckResponse,
   WallEntry,
@@ -20,7 +19,6 @@ export type {
   AuditStreamConnectionState,
   AuditStreamEventName,
   AuditState,
-  AuditStreamStatus,
   CreateAuditRequest,
   DatabaseHealth,
   Finding,
@@ -188,10 +186,6 @@ export function getAudit(auditId: string) {
   return request<Audit>(`/audits/${encodeURIComponent(auditId)}`);
 }
 
-export function getAuditStreamStatus(auditId: string) {
-  return request<AuditStreamStatus>(`/audits/${encodeURIComponent(auditId)}/stream`);
-}
-
 export function getAuditStreamUrl(auditId: string) {
   return buildApiUrl(`/audits/${encodeURIComponent(auditId)}/stream`);
 }
@@ -205,8 +199,6 @@ export const apiClient = {
   createAudit,
   createDemoAudit,
   getAudit,
-  getAuditStreamStatus,
-  getAuditStreamHandshake: getAuditStreamStatus,
   getAuditStreamUrl,
   getWall,
 };

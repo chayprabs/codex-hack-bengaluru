@@ -34,11 +34,6 @@ export type CreateAuditRequest = {
   repo_url: string;
 };
 
-export type AuditStreamStatus = {
-  status: "not_implemented";
-  message: string;
-};
-
 export type WallEntry = {
   audit_id: string;
   repo_url: string;
@@ -88,4 +83,4 @@ export type AuditCompleteEvent = {
 
 export type AuditStreamEventName = "agent_status" | "finding" | "score_update" | "audit_complete";
 
-export type AuditStreamConnectionState = "connecting" | "live" | "reconnecting" | "closed";
+export type AuditStreamConnectionState = "connecting" | "live" | "polling" | "reconnecting" | "closed";

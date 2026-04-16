@@ -1,7 +1,8 @@
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import Callable
 
-from ..models import AgentState, AuditState, FindingSeverity
+from ..models import AgentState, AgentStatus, Audit, AuditState, Finding, FindingSeverity
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,7 +31,67 @@ class AuditLifecycleStep:
     score_update: ScoreUpdateSpec | None = None
 
 
-def build_default_simulation_steps() -> list[AuditLifecycleStep]:
+def apply_lifecycle_step(
+    audit: Audit,
+    step: AuditLifecycleStep,
+    *,
+    occurred_at: datetime,
+) -> Audit:
+    updated = audit.model_copy(deep=True)
+    updated.updated_at = occurred_at
+
+    if step.audit_status is not None:
+        updated.status = step.audit_status
+
+    if step.agent_name and step.agent_status and step.agent_message:
+        updated.agents = _upsert_agent(
+            updated.agents,
+            AgentStatus(
+                name=step.agent_name,
+                status=step.agent_status,
+                message=step.agent_message,
+                updated_at=occurred_at,
+            ),
+        )
+
+    if step.finding is not None:
+        updated.findings = [
+            *updated.findings,
+            Finding(
+                severity=step.finding.severity,
+                title=step.finding.title,
+                summary=step.finding.summary,
+                file_path=step.finding.file_path,
+                line=step.finding.line,
+                created_at=occurred_at,
+            ),
+        ]
+
+    if step.score_update is not None:
+        updated.score = step.score_update.score
+
+    return updated
+
+
+def materialize_lifecycle(
+    audit: Audit,
+    steps: list[AuditLifecycleStep],
+    *,
+    started_at: datetime | None = None,
+) -> Audit:
+    current = audit.model_copy(deep=True)
+    current_time = started_at or current.created_at
+    current.created_at = current_time
+    current.updated_at = current_time
+
+    for step in steps:
+        current_time += timedelta(seconds=step.delay_seconds)
+        current = apply_lifecycle_step(current, step, occurred_at=current_time)
+
+    return current
+
+
+def build_default_simulation_steps(_: Audit) -> list[AuditLifecycleStep]:
     return [
         AuditLifecycleStep(
             delay_seconds=0.15,
@@ -120,4 +181,15 @@ def build_default_simulation_steps() -> list[AuditLifecycleStep]:
     ]
 
 
-AuditSimulationPlanBuilder = Callable[[], list[AuditLifecycleStep]]
+def _upsert_agent(agents: list[AgentStatus], next_agent: AgentStatus) -> list[AgentStatus]:
+    updated_agents = list(agents)
+    for index, agent in enumerate(updated_agents):
+        if agent.name == next_agent.name:
+            updated_agents[index] = next_agent
+            break
+    else:
+        updated_agents.append(next_agent)
+    return updated_agents
+
+
+AuditSimulationPlanBuilder = Callable[[Audit], list[AuditLifecycleStep]]

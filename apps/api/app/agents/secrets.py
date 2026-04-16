@@ -50,6 +50,7 @@ IGNORED_DIRECTORIES = {
     "venv",
     "env",
 }
+SKIPPED_ANALYSIS_PARTS = {"agents", "tests", "test", "docs", "examples", "__pycache__"}
 
 TEXT_FILE_SUFFIXES = {
     ".py",
@@ -482,6 +483,9 @@ class SecretsAgent(BaseAgent):
         try:
             relative = file_path.resolve(strict=False).relative_to(root).as_posix()
         except ValueError:
+            return
+        parts = {part.lower() for part in PurePosixPath(relative).parts}
+        if not parts.isdisjoint(SKIPPED_ANALYSIS_PARTS):
             return
         collected.setdefault(relative, file_path)
 

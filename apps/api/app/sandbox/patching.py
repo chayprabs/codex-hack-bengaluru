@@ -4,13 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from os import PathLike
 from pathlib import Path
 import tempfile
 from typing import Any, Literal
 
 from .executor import CommandResult, run_command
-from .paths import PathValue, SandboxPathError, as_path, ensure_within
+from .paths import PathValue, SandboxPathError, ensure_within, resolve_path
 from .workspace import SandboxWorkspace
 
 PatchMode = Literal["unified_diff", "file_replacements"]
@@ -342,23 +341,19 @@ def _resolve_patch_root(
     workspace: SandboxWorkspace | None,
     sandbox_root: PathValue | None,
 ) -> Path:
-    raw_cwd = as_path(cwd).expanduser()
     try:
-        if workspace is not None:
-            base_dir = workspace.root
-            candidate = raw_cwd if raw_cwd.is_absolute() else base_dir / raw_cwd
-            root = ensure_within(base_dir, candidate)
-        elif sandbox_root is not None:
-            base_dir = as_path(sandbox_root).resolve(strict=False)
-            candidate = raw_cwd if raw_cwd.is_absolute() else base_dir / raw_cwd
-            root = ensure_within(base_dir, candidate)
-        else:
-            root = raw_cwd.resolve(strict=False)
+        root = (
+            resolve_path(cwd, root=workspace.root)
+            if workspace is not None
+            else resolve_path(cwd, root=sandbox_root)
+            if sandbox_root is not None
+            else resolve_path(cwd)
+        )
     except SandboxPathError as exc:
         raise PatchApplicationError(
             "invalid_patch_root",
             "Patch target directory must stay within the sandbox boundary.",
-            details={"cwd": str(raw_cwd)},
+            details={"cwd": str(cwd)},
         ) from exc
 
     if not root.exists():

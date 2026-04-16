@@ -10,7 +10,7 @@ import subprocess
 import time
 from typing import Any
 
-from .paths import PathValue, SandboxPathError, as_path, ensure_within
+from .paths import PathValue, SandboxPathError, resolve_path
 from .workspace import SandboxWorkspace
 
 DEFAULT_ALLOWED_EXECUTABLES = frozenset(
@@ -94,7 +94,7 @@ def run_command(
     env: Mapping[str, str | None] | None = None,
     allowed_executables: Collection[str] | None = DEFAULT_ALLOWED_EXECUTABLES,
 ) -> CommandResult:
-    """Run a command and capture structured output."""
+    """Run a command without a shell and capture structured output."""
 
     normalized_command = _normalize_command(command)
     working_directory = _resolve_working_directory(
@@ -185,24 +185,18 @@ def _resolve_working_directory(
     workspace: SandboxWorkspace | None,
     sandbox_root: PathValue | None,
 ) -> Path:
-    raw_cwd = as_path(cwd).expanduser()
-
     try:
         if workspace is not None:
-            base_dir = workspace.root
-            candidate = raw_cwd if raw_cwd.is_absolute() else base_dir / raw_cwd
-            working_directory = ensure_within(base_dir, candidate)
+            working_directory = resolve_path(cwd, root=workspace.root)
         elif sandbox_root is not None:
-            base_dir = as_path(sandbox_root).resolve(strict=False)
-            candidate = raw_cwd if raw_cwd.is_absolute() else base_dir / raw_cwd
-            working_directory = ensure_within(base_dir, candidate)
+            working_directory = resolve_path(cwd, root=sandbox_root)
         else:
-            working_directory = raw_cwd.resolve(strict=False)
+            working_directory = resolve_path(cwd)
     except SandboxPathError as exc:
         raise SandboxCommandError(
             "invalid_working_directory",
             "Working directory must stay within the sandbox boundary.",
-            details={"cwd": str(raw_cwd)},
+            details={"cwd": str(cwd)},
         ) from exc
 
     if not working_directory.exists():
