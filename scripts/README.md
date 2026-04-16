@@ -14,6 +14,12 @@ From the repo root:
 - `npm run setup` installs web deps and bootstraps the API virtualenv with dev/test tooling
 - `npm run setup:web` installs only web dependencies
 - `npm run setup:api` bootstraps only the API virtualenv
-- `npm run dev` starts web and api together
-- `npm run dev:web` starts only the web app
-- `npm run dev:api` starts only the api
+- `npm run dev` starts web and api together and auto-picks a free local API port if `8000` is already in use
+- `npm run dev:web` starts only the web app and reuses the local API URL from `dev:api` when available
+- `npm run dev:api` starts only the api and auto-picks a free local API port if `8000` is already in use
+
+Notes:
+
+- `npm run dev` forces the web app to talk to the local API instance it launched, so the landing page and audit room keep working even when the API falls back from `8000` to another port
+- if you use split terminals, start `npm run dev:api` first, then `npm run dev:web`; the web runner will reuse the API port from the local dev state file
+- set `TRUSTLAYER_API_PORT=<port>` before `npm run dev` or `npm run dev:api` if you want to pin the API to a specific port

@@ -16,11 +16,19 @@ export default function Loading() {
             New audit
           </Link>
           <Link href="/wall" className={pageActionClassName}>
-            View shame wall
+            View wall
           </Link>
         </>
       }
     >
+      <section className="rounded-[1.75rem] border border-slate-200 bg-[linear-gradient(135deg,rgba(255,255,255,0.97),rgba(248,250,252,0.94))] p-5 shadow-sm sm:p-6">
+        <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Building audit room</p>
+        <h1 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-slate-950">Pulling findings, score changes, and report state</h1>
+        <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">
+          On the demo path, this room replays the same core findings in the same order every time.
+        </p>
+      </section>
+
       <AuditHeader auditId="loading" repoUrl="Loading repository..." findingsCount={0} isLoading />
 
       <AuditStatusBar status="queued" agents={[]} findingsCount={0} transportLabel="Loading" isLoading />
@@ -33,7 +41,7 @@ export default function Loading() {
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Agents</p>
             <h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-slate-950">Audit lanes</h2>
             <p className="mt-2 text-sm leading-6 text-slate-600">
-              Loading the latest planner, scanner, and verifier status.
+              Loading planner, scanner, and verifier updates.
             </p>
           </div>
 
@@ -47,8 +55,8 @@ export default function Loading() {
 
       <FindingFeed
         isLoading
-        title="Finding feed"
-        description="Loading findings and evidence from the latest audit snapshot."
+        title="Findings"
+        description="Loading findings and review status."
       />
     </PageShell>
   );

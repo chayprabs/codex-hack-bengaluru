@@ -88,10 +88,11 @@ export function AuditStatusBar({
   const completedAgents = agents.filter((agent) => agent.status === "completed").length;
   const runningAgents = agents.filter((agent) => agent.status === "running").length;
   const failedAgents = agents.filter((agent) => agent.status === "failed").length;
+  const latestMoment = moments[0] ?? null;
 
   const summaryItems = [
     {
-      label: "Attack story",
+      label: "Current phase",
       value: story.phaseLabel,
       detail: story.detail,
       tone: "border-slate-200 bg-white/85",
@@ -99,24 +100,32 @@ export function AuditStatusBar({
     {
       label: "Major findings",
       value: `${highImpactCount}`,
-      detail: highImpactCount ? "High-impact lanes now carry red-to-green response steps." : "No major findings have landed yet.",
+      detail: highImpactCount ? "Major findings are moving from detection to evidence and review." : "No major findings yet.",
       tone: highImpactCount ? "border-rose-200 bg-rose-50/85" : "border-slate-200 bg-white/85",
     },
     {
-      label: "Agent flow",
+      label: "Agent progress",
       value: `${completedAgents}/${agents.length || 0}`,
       detail:
         runningAgents > 0
-          ? `${runningAgents} lane${runningAgents === 1 ? "" : "s"} live now`
+          ? `${runningAgents} agent${runningAgents === 1 ? "" : "s"} still updating`
           : failedAgents > 0
-            ? `${failedAgents} lane${failedAgents === 1 ? "" : "s"} blocked`
-            : "All visible lanes are waiting or closed",
+            ? `${failedAgents} agent${failedAgents === 1 ? "" : "s"} need attention`
+            : completedAgents === agents.length && agents.length > 0
+              ? "All visible agents have posted their latest update"
+              : "Waiting for the next update",
       tone: runningAgents > 0 ? "border-cyan-200 bg-cyan-50/85" : failedAgents > 0 ? "border-rose-200 bg-rose-50/85" : "border-slate-200 bg-white/85",
     },
     {
-      label: "Transport",
+      label: "Stream",
       value: transportLabel,
-      detail: isRefreshing ? "Refreshing and reconnecting live context." : updatedAt ? `Updated ${formatRelativeTime(updatedAt)}` : "Waiting for the first event.",
+      detail: isRefreshing
+        ? "Pulling the next update."
+        : latestMoment
+          ? `${latestMoment.label} ${formatRelativeTime(latestMoment.timestamp)}.`
+          : updatedAt
+            ? `Updated ${formatRelativeTime(updatedAt)}.`
+            : "Waiting for the first event.",
       tone: isRefreshing ? "border-cyan-200 bg-cyan-50/85" : "border-slate-200 bg-white/85",
     },
   ];
@@ -134,7 +143,7 @@ export function AuditStatusBar({
       <div className="relative">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
           <div className="max-w-4xl">
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Attack story</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Live audit flow</p>
             <h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-slate-950">{story.headline}</h2>
             <p className="mt-3 text-sm leading-6 text-slate-600 sm:text-base">{story.detail}</p>
           </div>
@@ -152,6 +161,19 @@ export function AuditStatusBar({
           </div>
         </div>
 
+        {latestMoment ? (
+          <div className="mt-5 rounded-[1.25rem] border border-slate-200 bg-slate-950 px-4 py-3 text-slate-100">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Latest update</p>
+              <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-slate-400">
+                {formatRelativeTime(latestMoment.timestamp)}
+              </p>
+            </div>
+            <p className="mt-2 text-sm font-semibold tracking-[-0.02em] text-white">{latestMoment.label}</p>
+            <p className="mt-1 text-sm leading-6 text-slate-300">{latestMoment.detail}</p>
+          </div>
+        ) : null}
+
         <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {summaryItems.map((item) => (
             <div key={item.label} className={cn("rounded-2xl border px-4 py-4", item.tone)}>
@@ -165,9 +187,9 @@ export function AuditStatusBar({
         <div className="mt-6 rounded-[1.5rem] border border-slate-200 bg-white/70 p-4 sm:p-5">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Story rail</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Audit progress</p>
               <p className="mt-2 text-sm leading-6 text-slate-600">
-                Major findings move from discovery into evidence, patch planning, and verification closeout.
+                Findings move from detection to evidence, fix guidance, and review.
               </p>
             </div>
             <p className="font-mono text-xs uppercase tracking-[0.18em] text-slate-500">
@@ -181,9 +203,9 @@ export function AuditStatusBar({
           <div className="mt-6">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Live flow</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Recent updates</p>
                 <p className="mt-2 text-sm leading-6 text-slate-600">
-                  Recent events are ordered like an incident story instead of a flat activity log.
+                  The newest events from this audit room.
                 </p>
               </div>
             </div>
@@ -202,9 +224,17 @@ export function AuditStatusBar({
                     <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
                       {moment.lane ?? "story"}
                     </p>
-                    <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-slate-500">
-                      {formatRelativeTime(moment.timestamp)}
-                    </p>
+                    <div className="flex items-center gap-2">
+                      {moment.highlight ? (
+                        <span className="inline-flex items-center gap-2 rounded-full border border-cyan-200 bg-cyan-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-700">
+                          <span className="story-pulse inline-flex h-2 w-2 rounded-full bg-cyan-500" />
+                          Live
+                        </span>
+                      ) : null}
+                      <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-slate-500">
+                        {formatRelativeTime(moment.timestamp)}
+                      </p>
+                    </div>
                   </div>
                   <h3 className="mt-3 text-sm font-semibold tracking-[-0.02em] text-slate-950">{moment.label}</h3>
                   <p className="mt-2 text-sm leading-6 text-slate-600">{moment.detail}</p>

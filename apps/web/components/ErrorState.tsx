@@ -14,7 +14,7 @@ type ErrorStateProps = {
 
 export function ErrorState({
   title = "Something went wrong",
-  description = "The latest dashboard data could not be loaded.",
+  description = "Could not load the latest audit data.",
   message,
   code,
   action,
@@ -24,7 +24,7 @@ export function ErrorState({
   return (
     <section
       className={cn(
-        "rounded-[1.5rem] border border-rose-200 bg-rose-50/80 text-rose-900",
+        "rounded-[1.5rem] border border-rose-200 bg-[linear-gradient(135deg,rgba(255,241,242,0.96),rgba(255,255,255,0.92))] text-rose-900",
         compact ? "p-5" : "p-6 sm:p-8",
         className,
       )}

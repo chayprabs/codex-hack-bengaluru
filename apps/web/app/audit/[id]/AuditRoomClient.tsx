@@ -12,7 +12,7 @@ import {
   buildStoryMoments,
   canShowAgentTrace,
 } from "@/lib/auditStory";
-import type { Audit, AuditCompleteEvent, FindingSeverity } from "@/lib/types";
+import type { Audit, AuditCompleteEvent, FindingSeverity, ScoreUpdateEvent } from "@/lib/types";
 import { formatDateTime, formatScore } from "@/lib/format";
 import { titleCase } from "@/lib/utils";
 import { useAuditStream } from "@/hooks/useAuditStream";
@@ -21,7 +21,10 @@ import { AgentTracePanel } from "@/components/AgentTracePanel";
 import { AuditHeader } from "@/components/AuditHeader";
 import { AuditStatusBar } from "@/components/AuditStatusBar";
 import { CoveragePanel } from "@/components/CoveragePanel";
+import { EvidenceBundleCard } from "@/components/EvidenceBundleCard";
 import { EmptyState } from "@/components/EmptyState";
+import { FinalReportSummaryCard } from "@/components/FinalReportSummaryCard";
+import { FindingBucketSummary } from "@/components/FindingBucketSummary";
 import { FindingFeed } from "@/components/FindingFeed";
 import { PageShell, pageActionClassName } from "@/components/PageShell";
 import { StatusBadge, formatSeverityBadgeLabel, toneFromAuditStatus, toneFromSeverity } from "@/components/StatusBadge";
@@ -48,7 +51,7 @@ function transportLabel(connectionState: ReturnType<typeof useAuditStream>["conn
   }
 
   if (connectionState === "polling") {
-    return "Snapshot sync";
+    return "Sync mode";
   }
 
   if (connectionState === "reconnecting") {
@@ -59,34 +62,41 @@ function transportLabel(connectionState: ReturnType<typeof useAuditStream>["conn
     return "Connecting";
   }
 
-  return status === "completed" || status === "failed" ? "Stream complete" : "Stream idle";
+  return status === "completed" || status === "failed" ? "Final snapshot" : "Waiting";
 }
 
 function CompletedStateSummary({
   audit,
   completionEvent,
-}: Readonly<{ audit: Audit; completionEvent: AuditCompleteEvent | null }>) {
+  scoreHistory,
+  findingStories,
+}: Readonly<{
+  audit: Audit;
+  completionEvent: AuditCompleteEvent | null;
+  scoreHistory: ScoreUpdateEvent[];
+  findingStories: Record<string, ReturnType<typeof buildFindingStory>>;
+}>) {
   const severityCounts = createSeverityCounts(audit);
   const highestSeverity = getHighestSeverity(severityCounts);
   const completedAgents = audit.agents.filter((agent) => agent.status === "completed").length;
   const failedAgents = audit.agents.filter((agent) => agent.status === "failed").length;
   const totalFindings = completionEvent?.finding_count ?? audit.findings.length;
-  const title = audit.status === "completed" ? "Final report" : "Final report with failures";
+  const title = audit.status === "completed" ? "Final report" : "Report needs review";
   const terminalMessage = completionEvent?.message ?? audit.completion_message;
   const description =
     audit.confidence_limited
       ? terminalMessage
-        ? `${terminalMessage} Coverage stayed limited, so the score should be treated as provisional until more of the repo is verified.`
-        : `Coverage stayed limited at ${audit.coverage}/100, so the score should be treated as provisional until more of the repo is verified.`
+        ? `${terminalMessage} Coverage stayed thin, so treat the score as a first call, not a final one.`
+        : `Coverage stayed thin at ${audit.coverage}/100, so treat the score as a first call, not a final one.`
       : terminalMessage
       ? terminalMessage
       : audit.coverage_summary
         ? audit.coverage_summary
         : audit.status === "completed"
           ? totalFindings
-            ? `The audit finished with ${totalFindings} recorded findings. Review the final snapshot before trusting the repository.`
-            : "The audit finished without recorded findings in the current snapshot."
-          : "The audit reached a failed terminal state. Review lane output and findings before relying on the result.";
+            ? `The audit ended with ${totalFindings} findings. Use the final report as the decision view.`
+            : "The audit finished without persisted findings."
+          : "The audit ended early. Review the latest findings and agent output before relying on this run.";
 
   return (
     <section className="rounded-[1.75rem] border border-slate-200 bg-white/90 p-5 shadow-sm sm:p-6">
@@ -97,18 +107,29 @@ function CompletedStateSummary({
           <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600 sm:text-base">{description}</p>
         </div>
         <StatusBadge tone={toneFromAuditStatus(audit.status)} mono>
-          {audit.status}
+          {titleCase(audit.status)}
         </StatusBadge>
       </div>
 
       {audit.confidence_limited ? (
         <div className="mt-6 rounded-[1.25rem] border border-amber-200 bg-amber-50/90 px-4 py-4 text-amber-950">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">Confidence limited</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">Scope limited</p>
           <p className="mt-3 text-sm leading-6">
-            Coverage is low enough that the TrustScore should be read as directional rather than final. Extend repository access or verification before using it as a release gate.
+            Coverage is too thin to treat this as a final ship call. Read TrustScore as a first pass until scope expands.
           </p>
         </div>
       ) : null}
+
+      <FinalReportSummaryCard
+        audit={audit}
+        completionEvent={completionEvent}
+        scoreHistory={scoreHistory}
+        className="mt-6"
+      />
+
+      <FindingBucketSummary audit={audit} className="mt-6" />
+
+      <EvidenceBundleCard audit={audit} stories={findingStories} className="mt-6" />
 
       <div className="mt-6 grid gap-4 xl:grid-cols-2">
         <article className="rounded-[1.5rem] border border-slate-200 bg-[linear-gradient(135deg,rgba(255,255,255,0.98),rgba(248,250,252,0.94))] p-5">
@@ -117,12 +138,12 @@ function CompletedStateSummary({
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">TrustScore</p>
               <p className="mt-4 font-mono text-5xl font-semibold tracking-[-0.05em] text-slate-950">{formatScore(audit.score)}</p>
             </div>
-            <StatusBadge tone={toneFromAuditStatus(audit.status)} mono>
+            <StatusBadge tone="neutral" mono>
               {formatScore(audit.score)}/100
             </StatusBadge>
           </div>
           <p className="mt-4 text-sm leading-6 text-slate-600">
-            Hero metric for the final report. It reflects the current posture after findings and verifier closeout.
+            Final score after the latest findings and review.
           </p>
           <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Before -&gt; After</p>
@@ -138,11 +159,13 @@ function CompletedStateSummary({
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Coverage</p>
               <p className="mt-4 font-mono text-5xl font-semibold tracking-[-0.05em] text-slate-950">{formatScore(audit.coverage)}</p>
             </div>
-            <StatusBadge tone={audit.confidence_limited ? "danger" : "info"} mono>
+            <StatusBadge tone={audit.confidence_limited ? "warning" : "info"} mono>
               {titleCase(audit.coverage_band)}
             </StatusBadge>
           </div>
-          <p className="mt-4 text-sm leading-6 text-slate-600">{audit.coverage_summary}</p>
+          <p className="mt-4 text-sm leading-6 text-slate-600">
+            {audit.coverage_summary || "How much of the repo this report actually covered."}
+          </p>
           <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Before -&gt; After</p>
             <p className="mt-2 font-mono text-base font-semibold text-slate-950">
@@ -208,10 +231,10 @@ export function AuditRoomClient({ initialAudit }: Readonly<{ initialAudit: Audit
   const highImpactCount = audit.findings.filter((finding) => finding.severity === "high" || finding.severity === "critical").length;
   const findingsEmptyDescription =
     audit.status === "completed"
-      ? "The audit completed without persisted findings."
+      ? "This audit finished without persisted findings."
       : audit.status === "failed"
-        ? "The audit ended before any findings were persisted."
-        : "Findings will appear here as the backend emits them.";
+        ? "The audit ended before any findings were saved."
+        : "Findings appear here as the scan turns code into evidence.";
 
   useEffect(() => {
     if (!traceAgentName) {
@@ -232,7 +255,7 @@ export function AuditRoomClient({ initialAudit }: Readonly<{ initialAudit: Audit
             New audit
           </Link>
           <Link href="/wall" className={pageActionClassName}>
-            View shame wall
+            View wall
           </Link>
         </>
       }
@@ -241,6 +264,7 @@ export function AuditRoomClient({ initialAudit }: Readonly<{ initialAudit: Audit
         <AuditHeader
           auditId={audit.id}
           repoUrl={audit.repo_url || "Unknown repository"}
+          auditMode={audit.audit_mode}
           status={audit.status}
           createdAt={audit.created_at}
           updatedAt={audit.updated_at}
@@ -276,22 +300,34 @@ export function AuditRoomClient({ initialAudit }: Readonly<{ initialAudit: Audit
                       : "text-xs font-semibold uppercase tracking-[0.18em] text-amber-700"
                   }
                 >
-                  Live updates
+                  Live stream
                 </p>
-                <p className="mt-2 text-sm leading-6">{streamError}</p>
+                <p className="mt-2 text-sm leading-6">
+                  {connectionState === "polling"
+                    ? "Live updates paused. The room is staying current through snapshot sync."
+                    : streamError}
+                </p>
               </div>
               <StatusBadge tone={connectionState === "polling" ? "neutral" : "warning"} mono>
-                {connectionState === "polling" ? "Snapshot fallback" : "Reconnecting"}
+                {connectionState === "polling" ? "Sync mode" : "Reconnecting"}
               </StatusBadge>
             </div>
           </section>
         ) : null}
 
-        {hasTerminalState ? <CompletedStateSummary audit={audit} completionEvent={completionEvent} /> : null}
+        {hasTerminalState ? (
+          <CompletedStateSummary
+            audit={audit}
+            completionEvent={completionEvent}
+            scoreHistory={scoreHistory}
+            findingStories={findingStories}
+          />
+        ) : null}
 
         <TrustScore
           score={audit.score}
           scoreBaseline={audit.score_baseline}
+          event={latestScoreUpdate}
           previousScore={latestScoreUpdate?.previous_score ?? null}
           delta={latestScoreUpdate?.delta ?? null}
           updatedAt={latestScoreUpdate?.updated_at ?? audit.updated_at}
@@ -304,6 +340,16 @@ export function AuditRoomClient({ initialAudit }: Readonly<{ initialAudit: Audit
           coverageBand={audit.coverage_band}
           coverageSummary={audit.coverage_summary ?? null}
           confidenceLimited={audit.confidence_limited}
+          supportedAreas={audit.supported_areas}
+          partiallySupportedAreas={audit.partially_supported_areas}
+          unsupportedAreas={audit.unsupported_areas}
+          needsManualReviewAreas={audit.needs_manual_review_areas}
+          unsupportedTechnologies={audit.unsupported_technologies}
+          scannedFilesCount={audit.scanned_files_count}
+          skippedFilesCount={audit.skipped_files_count}
+          frameworksDetected={audit.frameworks_detected}
+          checksRun={audit.checks_run}
+          checksSkipped={audit.checks_skipped}
         />
 
         <div className="grid gap-6 xl:grid-cols-[0.88fr_1.12fr]">
@@ -314,7 +360,7 @@ export function AuditRoomClient({ initialAudit }: Readonly<{ initialAudit: Audit
                 <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Agents</p>
                 <h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-slate-950">Audit lanes</h2>
                 <p className="mt-2 text-sm leading-6 text-slate-600">
-                  Planner, scanner, and verifier now read as sequential response lanes inside the same attack story.
+                  Planner, scanner, and verifier update this room as the audit moves.
                 </p>
               </div>
               <StatusBadge mono>{audit.agents.length} lanes</StatusBadge>
@@ -334,9 +380,9 @@ export function AuditRoomClient({ initialAudit }: Readonly<{ initialAudit: Audit
                             type="button"
                             onClick={() => setTraceAgentName(agent.name)}
                             className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600 transition hover:border-cyan-200 hover:bg-cyan-50 hover:text-cyan-700"
-                          >
-                            View trace
-                          </button>
+                        >
+                          View trace
+                        </button>
                         ) : null
                       }
                     />
@@ -345,8 +391,8 @@ export function AuditRoomClient({ initialAudit }: Readonly<{ initialAudit: Audit
               ) : (
                 <EmptyState
                   compact
-                  title="No agent lanes yet"
-                  description="This audit does not currently expose planner, scanner, or verifier lane data."
+                  title="No agent updates yet"
+                  description="This audit does not expose planner, scanner, or verifier updates yet."
                 />
               )}
             </div>
@@ -356,8 +402,8 @@ export function AuditRoomClient({ initialAudit }: Readonly<{ initialAudit: Audit
         <FindingFeed
           findings={audit.findings}
           stories={findingStories}
-          title="Finding feed"
-          description="Findings are framed as live response tracks with evidence, remediation handoff, and verification state."
+          title="Findings"
+          description="Each finding shows why it matters, what backs it, and whether it was reviewed."
           emptyTitle="No findings recorded"
           emptyDescription={findingsEmptyDescription}
         />

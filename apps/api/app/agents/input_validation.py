@@ -116,7 +116,7 @@ class InputValidationAgent(BaseAgent):
     )
     repo_map_inputs = ("validation", "routes", "auth", "database")
 
-    def __init__(self, *, max_files: int = 70, max_findings: int = 24) -> None:
+    def __init__(self, *, max_files: int = 70, max_findings: int = 20) -> None:
         self.max_files = max_files
         self.max_findings = max_findings
 
@@ -227,59 +227,54 @@ class InputValidationAgent(BaseAgent):
         has_validation_markers = any(marker in lower_text for marker in VALIDATION_MARKERS)
         findings: list[InputValidationFinding] = []
         seen: set[tuple[str, int]] = set()
-        review_emitted = False
+        validation_gap: InputValidationFinding | None = None
 
         for line_number, raw_line in enumerate(text.splitlines(), start=1):
             if is_handler_like and WEAK_BODY_TYPE_RE.search(raw_line):
-                self._append_finding(
-                    findings,
-                    seen,
+                validation_gap = self._prefer_validation_gap(
+                    validation_gap,
                     InputValidationFinding(
                         kind="weak_body_type",
                         severity="medium",
                         confidence="medium",
-                        title="Route accepts weakly typed request input",
-                        description="This handler appears to accept `dict`, `Any`, or similarly weak request input types instead of a schema-backed payload.",
+                        title="Handler accepts weakly typed request input",
+                        description="This handler appears to accept `dict`, `Any`, or a similarly weak payload type instead of a schema-backed request model.",
                         file_path=relative_path,
                         line_start=line_number,
-                        evidence_excerpt=trim_output(raw_line, limit=180),
+                        evidence_excerpt=trim_output(raw_line, limit=160),
                         suggested_remediation="Replace weak request body types with an explicit schema or validated DTO before using request data.",
                     ),
                 )
             elif is_handler_like and RAW_REQUEST_RE.search(raw_line) and not has_validation_markers:
-                self._append_finding(
-                    findings,
-                    seen,
+                validation_gap = self._prefer_validation_gap(
+                    validation_gap,
                     InputValidationFinding(
                         kind="raw_request_parsing_without_validation",
                         severity="medium",
                         confidence="medium",
                         title="Handler parses request input without an obvious validator",
-                        description="This handler parses request input directly, but static inspection did not find a nearby schema or validator marker in the file.",
+                        description="This handler parses request input directly, but static inspection did not find a nearby schema or validator marker in the same file.",
                         file_path=relative_path,
                         line_start=line_number,
-                        evidence_excerpt=trim_output(raw_line, limit=180),
+                        evidence_excerpt=trim_output(raw_line, limit=160),
                         suggested_remediation="Validate parsed request data with an explicit schema before authorization, persistence, or business-logic use.",
                     ),
                 )
-                review_emitted = True
-            elif is_handler_like and INPUT_SOURCE_RE.search(raw_line) and not has_validation_markers and not review_emitted:
-                self._append_finding(
-                    findings,
-                    seen,
+            elif is_handler_like and INPUT_SOURCE_RE.search(raw_line) and not has_validation_markers:
+                validation_gap = self._prefer_validation_gap(
+                    validation_gap,
                     InputValidationFinding(
                         kind="missing_schema_validation_review",
                         severity="low",
                         confidence="low",
-                        title="Request-derived input lacks an obvious validation marker",
+                        title="Request input lacks an obvious validation marker",
                         description="This file reads request parameters or body data, but static inspection did not find a clear schema or validator marker nearby.",
                         file_path=relative_path,
                         line_start=line_number,
-                        evidence_excerpt=trim_output(raw_line, limit=180),
+                        evidence_excerpt=trim_output(raw_line, limit=160),
                         suggested_remediation="Review this handler manually and add explicit body, params, or query validation if it is currently relying on implicit coercion.",
                     ),
                 )
-                review_emitted = True
 
             if UNSAFE_EVAL_RE.search(raw_line):
                 self._append_finding(
@@ -293,7 +288,7 @@ class InputValidationAgent(BaseAgent):
                         description="This file uses `eval(...)`, which can execute attacker-controlled input if data reaches it unsafely.",
                         file_path=relative_path,
                         line_start=line_number,
-                        evidence_excerpt=trim_output(raw_line, limit=180),
+                        evidence_excerpt=trim_output(raw_line, limit=160),
                         suggested_remediation="Remove `eval` and replace it with a structured parser or explicit dispatch logic.",
                     ),
                 )
@@ -310,7 +305,7 @@ class InputValidationAgent(BaseAgent):
                         description="This file uses `exec` or an exec-style process helper, which deserves careful command-injection review.",
                         file_path=relative_path,
                         line_start=line_number,
-                        evidence_excerpt=trim_output(raw_line, limit=180),
+                        evidence_excerpt=trim_output(raw_line, limit=160),
                         suggested_remediation="Prefer structured APIs over exec-style helpers and avoid passing untrusted input into command execution paths.",
                     ),
                 )
@@ -327,12 +322,12 @@ class InputValidationAgent(BaseAgent):
                         description="This subprocess call enables `shell=True`, which sharply raises command-injection risk when arguments are dynamic.",
                         file_path=relative_path,
                         line_start=line_number,
-                        evidence_excerpt=trim_output(raw_line, limit=180),
+                        evidence_excerpt=trim_output(raw_line, limit=160),
                         suggested_remediation="Pass an argument list to the subprocess API and keep `shell=False` unless there is a documented, isolated need.",
                     ),
                 )
 
-            if RAW_SQL_DYNAMIC_CALL_RE.search(raw_line) or RAW_SQL_DYNAMIC_ASSIGNMENT_RE.search(raw_line):
+            if RAW_SQL_DYNAMIC_CALL_RE.search(raw_line):
                 self._append_finding(
                     findings,
                     seen,
@@ -344,8 +339,24 @@ class InputValidationAgent(BaseAgent):
                         description="This file appears to construct raw SQL with string concatenation, an f-string, or a template literal instead of parameter binding.",
                         file_path=relative_path,
                         line_start=line_number,
-                        evidence_excerpt=trim_output(raw_line, limit=180),
+                        evidence_excerpt=trim_output(raw_line, limit=160),
                         suggested_remediation="Switch to parameterized queries or ORM bind parameters before executing database reads or writes.",
+                    ),
+                )
+            elif RAW_SQL_DYNAMIC_ASSIGNMENT_RE.search(raw_line):
+                self._append_finding(
+                    findings,
+                    seen,
+                    InputValidationFinding(
+                        kind="raw_sql_string_concatenation",
+                        severity="medium",
+                        confidence="low",
+                        title="Raw SQL string is built with interpolation",
+                        description="This file builds a SQL string with interpolation. That may be safe later, but it deserves review unless the query is parameterized before execution.",
+                        file_path=relative_path,
+                        line_start=line_number,
+                        evidence_excerpt=trim_output(raw_line, limit=160),
+                        suggested_remediation="Review the execution path and switch to parameterized queries or bind variables before the SQL reaches the database.",
                     ),
                 )
 
@@ -361,7 +372,7 @@ class InputValidationAgent(BaseAgent):
                         description="This file uses `yaml.load(...)` or `yaml.unsafe_load(...)`, which can deserialize attacker-controlled objects if input is untrusted.",
                         file_path=relative_path,
                         line_start=line_number,
-                        evidence_excerpt=trim_output(raw_line, limit=180),
+                        evidence_excerpt=trim_output(raw_line, limit=160),
                         suggested_remediation="Use `yaml.safe_load(...)` or an explicitly safe loader when parsing untrusted YAML input.",
                     ),
                 )
@@ -378,7 +389,7 @@ class InputValidationAgent(BaseAgent):
                         description="This file uses `pickle.loads(...)` or a similar loader, which can execute arbitrary code on untrusted payloads.",
                         file_path=relative_path,
                         line_start=line_number,
-                        evidence_excerpt=trim_output(raw_line, limit=180),
+                        evidence_excerpt=trim_output(raw_line, limit=160),
                         suggested_remediation="Avoid pickle-based formats across trust boundaries and switch to a safe structured format such as JSON.",
                     ),
                 )
@@ -386,7 +397,24 @@ class InputValidationAgent(BaseAgent):
             if len(findings) >= self.max_findings:
                 break
 
+        if validation_gap is not None and len(findings) < self.max_findings:
+            self._append_finding(findings, seen, validation_gap)
+
         return findings
+
+    def _prefer_validation_gap(
+        self,
+        current: InputValidationFinding | None,
+        candidate: InputValidationFinding,
+    ) -> InputValidationFinding:
+        priority = {
+            "raw_request_parsing_without_validation": 3,
+            "weak_body_type": 2,
+            "missing_schema_validation_review": 1,
+        }
+        if current is None:
+            return candidate
+        return candidate if priority[candidate.kind] > priority[current.kind] else current
 
     def _patch_strategy(self, kind: InputValidationFindingKind) -> str:
         if kind in self._manual_review_kinds():

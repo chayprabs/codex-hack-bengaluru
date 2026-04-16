@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import sqlite3
 from collections.abc import Callable, Iterable
 from contextlib import closing
@@ -7,13 +8,14 @@ from pathlib import Path
 from threading import Lock, RLock
 from typing import Literal, Protocol
 
-from .core.config import settings
+from .core.config import DEFAULT_DATABASE_URL, settings
 from .models import AgentStatus, Audit, Finding, WallEntry, utc_now
 from .models.health import DatabaseHealth
 
 DatabaseDriver = Literal["memory", "sqlite"]
 UpdateAuditFn = Callable[[Audit], Audit]
 MEMORY_DATABASE_URLS = {"memory://", "memory", ":memory:", "sqlite:///:memory:"}
+logger = logging.getLogger(__name__)
 
 
 def _build_wall_entries(audits: Iterable[Audit]) -> list[WallEntry]:
@@ -23,9 +25,16 @@ def _build_wall_entries(audits: Iterable[Audit]) -> list[WallEntry]:
             entries.append(
                 WallEntry(
                     audit_id=audit.id,
+                    finding_id=finding.id,
                     repo_url=audit.repo_url,
                     title=finding.title,
                     severity=finding.severity,
+                    agent_name=finding.agent_name,
+                    check_name=finding.check_name,
+                    impact_summary=finding.impact_summary,
+                    confidence=finding.confidence,
+                    proof_type=finding.proof_type,
+                    verification_state=finding.verification_state,
                     created_at=finding.created_at,
                 )
             )
@@ -312,20 +321,121 @@ class SQLiteAuditRepository(BaseAuditRepository):
 class DatabaseRuntime:
     def __init__(self, database_url: str) -> None:
         self.database_url = database_url
+        self._lock = RLock()
         self.audit_repository = self._build_audit_repository(database_url)
 
     def initialize(self) -> None:
-        self.audit_repository.initialize()
+        with self._lock:
+            try:
+                self.audit_repository.initialize()
+            except Exception:
+                logger.exception(
+                    "Database initialization failed for %s backend. Falling back to in-memory storage.",
+                    self.audit_repository.driver,
+                )
+                self.audit_repository = InMemoryAuditRepository()
+                self.audit_repository.initialize()
 
     def health(self) -> DatabaseHealth:
         return self.audit_repository.health()
 
+    def create_audit(self, audit: Audit) -> Audit:
+        return self.audit_repository.create_audit(audit)
+
+    def get_audit(self, audit_id: str) -> Audit | None:
+        return self.audit_repository.get_audit(audit_id)
+
+    def update_audit(self, audit_id: str, updater: UpdateAuditFn) -> Audit | None:
+        return self.audit_repository.update_audit(audit_id, updater)
+
+    def append_finding(self, audit_id: str, finding: Finding) -> Audit | None:
+        return self.audit_repository.append_finding(audit_id, finding)
+
+    def upsert_agent_status(
+        self,
+        audit_id: str,
+        agent_status: AgentStatus,
+    ) -> Audit | None:
+        return self.audit_repository.upsert_agent_status(audit_id, agent_status)
+
+    def update_score(self, audit_id: str, score: int) -> Audit | None:
+        return self.audit_repository.update_score(audit_id, score)
+
+    def list_wall_entries(self) -> list[WallEntry]:
+        return self.audit_repository.list_wall_entries()
+
+    def has_audits(self) -> bool:
+        return self.audit_repository.has_audits()
+
     @staticmethod
     def _build_audit_repository(database_url: str) -> AuditRepository:
-        if database_url.strip() in MEMORY_DATABASE_URLS:
+        normalized_url = database_url.strip()
+        if not normalized_url:
+            logger.warning(
+                "DATABASE_URL was empty. Falling back to %s.",
+                DEFAULT_DATABASE_URL,
+            )
+            normalized_url = DEFAULT_DATABASE_URL
+
+        if normalized_url in MEMORY_DATABASE_URLS:
             return InMemoryAuditRepository()
-        return SQLiteAuditRepository(database_url)
+        if normalized_url.startswith("sqlite:///"):
+            return SQLiteAuditRepository(normalized_url)
+
+        logger.warning(
+            "Unsupported DATABASE_URL %r. Falling back to %s.",
+            normalized_url,
+            DEFAULT_DATABASE_URL,
+        )
+        return SQLiteAuditRepository(DEFAULT_DATABASE_URL)
+
+
+class AuditRepositoryProxy(BaseAuditRepository):
+    def __init__(self, runtime: DatabaseRuntime) -> None:
+        self.runtime = runtime
+
+    @property
+    def driver(self) -> DatabaseDriver:
+        return self.runtime.audit_repository.driver
+
+    def initialize(self) -> None:
+        self.runtime.initialize()
+
+    def health(self) -> DatabaseHealth:
+        return self.runtime.health()
+
+    def create_audit(self, audit: Audit) -> Audit:
+        return self.runtime.create_audit(audit)
+
+    def get_audit(self, audit_id: str) -> Audit | None:
+        return self.runtime.get_audit(audit_id)
+
+    def update_audit(self, audit_id: str, updater: UpdateAuditFn) -> Audit | None:
+        return self.runtime.update_audit(audit_id, updater)
+
+    def append_finding(
+        self,
+        audit_id: str,
+        finding: Finding,
+    ) -> Audit | None:
+        return self.runtime.append_finding(audit_id, finding)
+
+    def upsert_agent_status(
+        self,
+        audit_id: str,
+        agent_status: AgentStatus,
+    ) -> Audit | None:
+        return self.runtime.upsert_agent_status(audit_id, agent_status)
+
+    def update_score(self, audit_id: str, score: int) -> Audit | None:
+        return self.runtime.update_score(audit_id, score)
+
+    def list_wall_entries(self) -> list[WallEntry]:
+        return self.runtime.list_wall_entries()
+
+    def has_audits(self) -> bool:
+        return self.runtime.has_audits()
 
 
 database_runtime = DatabaseRuntime(settings.database_url)
-audit_repository = database_runtime.audit_repository
+audit_repository = AuditRepositoryProxy(database_runtime)

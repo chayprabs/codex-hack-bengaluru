@@ -1,6 +1,8 @@
 import type { ScoreMoment } from "@/lib/auditStory";
 import type { CoverageBand, ScoreUpdateEvent } from "@/lib/types";
 import { formatDateTime, formatRelativeTime, formatScore, formatScoreDelta } from "@/lib/format";
+import { formatAuditLabel, toneFromCoverageBand, unsupportedScopeCount } from "@/lib/coveragePresentation";
+import { describeScoreUpdate } from "@/lib/scoreNarrative";
 import { cn, titleCase } from "@/lib/utils";
 import { StatusBadge } from "@/components/StatusBadge";
 
@@ -16,6 +18,16 @@ type TrustScoreProps = {
   coverageBand?: CoverageBand | null;
   coverageSummary?: string | null;
   confidenceLimited?: boolean;
+  supportedAreas?: string[];
+  partiallySupportedAreas?: string[];
+  unsupportedAreas?: string[];
+  needsManualReviewAreas?: string[];
+  unsupportedTechnologies?: string[];
+  scannedFilesCount?: number | null;
+  skippedFilesCount?: number | null;
+  frameworksDetected?: string[];
+  checksRun?: string[];
+  checksSkipped?: string[];
   label?: string | null;
   updatedAt?: string | null;
   event?: ScoreUpdateEvent | null;
@@ -42,22 +54,6 @@ function toneFromScore(score: number, max: number) {
   }
 
   return "danger";
-}
-
-function toneFromCoverageBand(band: CoverageBand | null | undefined) {
-  switch (band) {
-    case "deep":
-      return "success";
-    case "broad":
-      return "info";
-    case "targeted":
-      return "warning";
-    case "limited":
-    case "minimal":
-      return "danger";
-    default:
-      return "neutral";
-  }
 }
 
 function momentToneClasses(tone: ScoreMoment["tone"]) {
@@ -101,6 +97,16 @@ function coverageFillClasses(band: CoverageBand | null | undefined) {
     default:
       return "bg-slate-400";
   }
+}
+
+function summarizeList(values: string[], limit = 3) {
+  if (!values.length) {
+    return "None";
+  }
+
+  const visible = values.slice(0, limit).map(formatAuditLabel);
+  const hiddenCount = values.length - visible.length;
+  return hiddenCount > 0 ? `${visible.join(", ")} +${hiddenCount} more` : visible.join(", ");
 }
 
 function TransitionValue({
@@ -153,6 +159,16 @@ export function TrustScore({
   coverageBand,
   coverageSummary,
   confidenceLimited,
+  supportedAreas = [],
+  partiallySupportedAreas = [],
+  unsupportedAreas = [],
+  needsManualReviewAreas = [],
+  unsupportedTechnologies = [],
+  scannedFilesCount,
+  skippedFilesCount,
+  frameworksDetected = [],
+  checksRun = [],
+  checksSkipped = [],
   label,
   updatedAt,
   event,
@@ -177,6 +193,34 @@ export function TrustScore({
   const resolvedCoverageBand = event?.coverage_band ?? coverageBand ?? null;
   const resolvedCoverageSummary = event?.coverage_summary ?? coverageSummary ?? null;
   const resolvedConfidenceLimited = event?.confidence_limited ?? confidenceLimited ?? false;
+  const meaningfulMoment =
+    moments.find((moment) => (moment.delta ?? 0) !== 0 || (moment.coverageDelta ?? 0) !== 0) ?? moments[0] ?? null;
+  const resolvedScoreReason =
+    event && (((event.delta ?? 0) !== 0) || ((event.coverage_delta ?? 0) !== 0))
+      ? describeScoreUpdate(event)
+      : meaningfulMoment?.detail ?? (event ? describeScoreUpdate(event) : null);
+  const footprintSupportedAreas = event?.supported_areas ?? supportedAreas;
+  const footprintPartiallySupportedAreas = event?.partially_supported_areas ?? partiallySupportedAreas;
+  const footprintUnsupportedAreas = event?.unsupported_areas ?? unsupportedAreas;
+  const footprintNeedsManualReviewAreas = event?.needs_manual_review_areas ?? needsManualReviewAreas;
+  const footprintUnsupportedTechnologies = event?.unsupported_technologies ?? unsupportedTechnologies;
+  const footprintUnsupportedCount = unsupportedScopeCount(footprintUnsupportedAreas, footprintUnsupportedTechnologies);
+  const footprintScannedFilesCount = event?.scanned_files_count ?? scannedFilesCount ?? 0;
+  const footprintSkippedFilesCount = event?.skipped_files_count ?? skippedFilesCount ?? 0;
+  const footprintFrameworksDetected = event?.frameworks_detected ?? frameworksDetected;
+  const footprintChecksRun = event?.checks_run ?? checksRun;
+  const footprintChecksSkipped = event?.checks_skipped ?? checksSkipped;
+  const hasCoverageFootprint =
+    footprintScannedFilesCount > 0 ||
+    footprintSkippedFilesCount > 0 ||
+    footprintFrameworksDetected.length > 0 ||
+    footprintChecksRun.length > 0 ||
+    footprintChecksSkipped.length > 0 ||
+    footprintSupportedAreas.length > 0 ||
+    footprintPartiallySupportedAreas.length > 0 ||
+    footprintUnsupportedAreas.length > 0 ||
+    footprintNeedsManualReviewAreas.length > 0 ||
+    footprintUnsupportedTechnologies.length > 0;
 
   if (isLoading) {
     return (
@@ -206,10 +250,12 @@ export function TrustScore({
     >
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Score system</p>
-          <h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-slate-950">{resolvedLabel}</h2>
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">TrustScore</p>
+          <h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-slate-950">
+            {resolvedLabel === "TrustScore" ? "TrustScore and Coverage" : `${resolvedLabel} and Coverage`}
+          </h2>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-            TrustScore is the hero metric for risk posture. Coverage sits beside it to show how much real evidence and verification the score is standing on.
+            TrustScore tells you how risky the repo looks. Coverage tells you how much of that call is backed by real review.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -242,7 +288,7 @@ export function TrustScore({
           </div>
 
           <p className="mt-4 text-sm leading-6 text-slate-600">
-            A calibrated posture score derived from surfaced findings and final verification state, not from raw scanner volume alone.
+            This score moves when risk meaningfully changes.
           </p>
 
           <div className="mt-5">
@@ -273,12 +319,19 @@ export function TrustScore({
               </dd>
             </div>
             <div className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3">
-              <dt className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Live delta</dt>
+              <dt className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Latest shift</dt>
               <dd className="mt-2 font-mono text-base font-semibold text-slate-950">
                 {resolvedDelta === null ? "N/A" : formatScoreDelta(resolvedDelta)}
               </dd>
             </div>
           </dl>
+
+          {resolvedScoreReason ? (
+            <div className="mt-5 rounded-[1.25rem] border border-slate-200 bg-slate-50/90 px-4 py-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Latest explanation</p>
+              <p className="mt-3 text-sm leading-6 text-slate-700">{resolvedScoreReason}</p>
+            </div>
+          ) : null}
         </article>
 
         <article className="rounded-[1.5rem] border border-slate-200 bg-white/85 p-5">
@@ -295,7 +348,7 @@ export function TrustScore({
           </div>
 
           <p className="mt-4 text-sm leading-6 text-slate-600">
-            Coverage measures how much of the repository was actually acquired, scoped, executed by specialist lanes, and carried through verifier closeout.
+            Coverage shows how much of the repo was actually checked and reviewed.
           </p>
 
           <div className="mt-5">
@@ -326,7 +379,7 @@ export function TrustScore({
               </dd>
             </div>
             <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-              <dt className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Latest move</dt>
+              <dt className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Latest shift</dt>
               <dd className="mt-2 font-mono text-base font-semibold text-slate-950">
                 {resolvedCoverageDelta === null ? "N/A" : formatScoreDelta(resolvedCoverageDelta)}
               </dd>
@@ -345,11 +398,11 @@ export function TrustScore({
                 resolvedConfidenceLimited ? "text-amber-700" : "text-slate-500",
               )}
             >
-              {resolvedConfidenceLimited ? "Confidence limited" : "Credibility signal"}
+              {resolvedConfidenceLimited ? "Limited by scope" : "Score support"}
             </p>
             <p className={cn("mt-3 text-sm leading-6", resolvedConfidenceLimited ? "text-amber-900" : "text-slate-700")}>
               {resolvedCoverageSummary ??
-                "Coverage will rise as the repo is acquired, specialist lanes complete, and verification closes the report."}
+                "Coverage rises as the scan expands and findings are reviewed."}
             </p>
           </div>
         </article>
@@ -370,13 +423,100 @@ export function TrustScore({
         </div>
       </dl>
 
+      {hasCoverageFootprint ? (
+        <div className="mt-6 rounded-[1.25rem] border border-slate-200 bg-white/82 p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">What was checked</p>
+              <p className="mt-2 text-sm leading-6 text-slate-600">
+                Quick proof of what this score is based on.
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-3 xl:grid-cols-2">
+            <div className="rounded-[1.25rem] border border-slate-200 bg-slate-50 px-4 py-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Execution</p>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Files</p>
+                  <p className="mt-2 font-mono text-base font-semibold text-slate-950">{footprintScannedFilesCount}</p>
+                  <p className="mt-1 text-sm text-slate-600">
+                    {footprintSkippedFilesCount > 0 ? `${footprintSkippedFilesCount} skipped` : "No skipped files recorded"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Checks run</p>
+                  <p className="mt-2 font-mono text-base font-semibold text-slate-950">{footprintChecksRun.length}</p>
+                  <p className="mt-1 text-sm text-slate-600">
+                    {footprintChecksSkipped.length > 0 ? `${footprintChecksSkipped.length} skipped` : "No skipped checks recorded"}
+                  </p>
+                </div>
+              </div>
+              <p className="mt-4 text-sm leading-6 text-slate-600">
+                {footprintChecksRun.length > 0 ? summarizeList(footprintChecksRun) : "No named checks yet."}
+              </p>
+            </div>
+
+            <div className="rounded-[1.25rem] border border-slate-200 bg-slate-50 px-4 py-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Scope</p>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Frameworks</p>
+                  <p className="mt-2 font-mono text-base font-semibold text-slate-950">{footprintFrameworksDetected.length}</p>
+                  <p className="mt-1 text-sm text-slate-600">{summarizeList(footprintFrameworksDetected)}</p>
+                </div>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Supported areas</p>
+                  <p className="mt-2 font-mono text-base font-semibold text-slate-950">{footprintSupportedAreas.length}</p>
+                  <p className="mt-1 text-sm text-slate-600">{summarizeList(footprintSupportedAreas)}</p>
+                </div>
+              </div>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <StatusBadge tone="success" mono size="sm">
+                  Supported {footprintSupportedAreas.length}
+                </StatusBadge>
+                <StatusBadge tone="warning" mono size="sm">
+                  Partially supported {footprintPartiallySupportedAreas.length}
+                </StatusBadge>
+                <StatusBadge tone="neutral" mono size="sm">
+                  Unsupported {footprintUnsupportedCount}
+                </StatusBadge>
+                <StatusBadge tone="info" mono size="sm">
+                  Needs manual review {footprintNeedsManualReviewAreas.length}
+                </StatusBadge>
+              </div>
+              {(footprintPartiallySupportedAreas.length > 0 ||
+                footprintUnsupportedAreas.length > 0 ||
+                footprintNeedsManualReviewAreas.length > 0 ||
+                footprintUnsupportedTechnologies.length > 0) ? (
+                <div className="mt-4 space-y-2 text-sm leading-6 text-slate-600">
+                  {footprintPartiallySupportedAreas.length > 0 ? (
+                    <p>Partially supported: {summarizeList(footprintPartiallySupportedAreas)}.</p>
+                  ) : null}
+                  {footprintUnsupportedAreas.length > 0 ? (
+                    <p>Unsupported: {summarizeList(footprintUnsupportedAreas)}.</p>
+                  ) : null}
+                  {footprintUnsupportedTechnologies.length > 0 ? (
+                    <p>Unsupported tech: {summarizeList(footprintUnsupportedTechnologies)}.</p>
+                  ) : null}
+                  {footprintNeedsManualReviewAreas.length > 0 ? (
+                    <p>Needs manual review: {summarizeList(footprintNeedsManualReviewAreas)}.</p>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {moments.length > 0 ? (
         <div className="mt-6 rounded-[1.25rem] border border-slate-200 bg-white/80 p-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Score change moments</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Score updates</p>
               <p className="mt-2 text-sm leading-6 text-slate-600">
-                Each update shows both posture and credibility so the score system feels explainable instead of arbitrary.
+                Each update explains why the score moved.
               </p>
             </div>
           </div>
@@ -431,7 +571,7 @@ export function TrustScore({
 
                 <p className="mt-3 text-sm leading-6 text-slate-600">{moment.detail}</p>
                 {moment.confidenceLimited ? (
-                  <p className="mt-2 text-sm font-medium text-amber-800">Coverage was still limited at this point, so confidence remained constrained.</p>
+                  <p className="mt-2 text-sm font-medium text-amber-800">Coverage was still limited here, so this was not a final call.</p>
                 ) : null}
               </article>
             ))}

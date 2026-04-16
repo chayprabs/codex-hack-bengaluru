@@ -19,6 +19,7 @@ from ..agents import (
     RepoWorkPlan,
     agent_registry,
 )
+from ..models.audit import AuditMode
 from ..models.common import StrictModel
 from ..sandbox import ExecutionBackendSelection, ExecutionSession
 from .scoring import ScoringService, TrustScoreSummary, scoring_service
@@ -27,16 +28,28 @@ AgentExecutionMode = Literal["auto", "no_execution"]
 AgentRunStatus = Literal["completed", "needs_review", "failed"]
 AgentResultCallback = Callable[[AgentResult], None]
 
-DEFAULT_SPECIALIST_ORDER = (
+FAST_SPECIALIST_ORDER = (
+    "secrets",
+    "auth",
+    "webhook",
+    "dependency",
+    "ai_guardrails",
+    "config_headers_cors",
+    "input_validation",
+)
+DEEP_SPECIALIST_ORDER = (
     "secrets",
     "auth",
     "authz",
     "webhook",
     "dependency",
+    "ai_guardrails",
     "config_headers_cors",
     "input_validation",
     "frontend_runtime",
     "build_type_lint",
+    "buildbreak",
+    "typelint",
     "api_contract",
 )
 EXECUTION_OPTIONAL_AGENTS = frozenset({"buildbreak", "typelint", "build_type_lint"})
@@ -61,6 +74,7 @@ class AgentRunRequest(StrictModel):
     repo_url: str | None = None
     audit_id: str | None = None
     ref: str | None = None
+    audit_mode: AuditMode = "fast"
     selected_agents: list[str] = Field(default_factory=list)
     execution_mode: AgentExecutionMode = "auto"
 
@@ -121,6 +135,7 @@ class AgentSystemRunner:
         audit_id: str | None = None,
         ref: str | None = None,
         selected_agents: Sequence[str] | None = None,
+        audit_mode: AuditMode = "fast",
         execution_mode: AgentExecutionMode = "auto",
         execution_session: ExecutionSession | None = None,
         execution_selection: ExecutionBackendSelection | None = None,
@@ -133,10 +148,14 @@ class AgentSystemRunner:
             audit_id=audit_id,
             ref=ref,
             selected_agents=selected_agents,
+            audit_mode=audit_mode,
             execution_mode=execution_mode,
         )
 
-        base_metadata: dict[str, Any] = {"execution_mode": normalized.execution_mode}
+        base_metadata: dict[str, Any] = {
+            "execution_mode": normalized.execution_mode,
+            "audit_mode": normalized.audit_mode,
+        }
         if execution_selection is not None:
             base_metadata["execution_backend"] = execution_selection.to_dict()
         if execution_session is not None:
@@ -228,6 +247,7 @@ class AgentSystemRunner:
         audit_id: str | None,
         ref: str | None,
         selected_agents: Sequence[str] | None,
+        audit_mode: AuditMode,
         execution_mode: AgentExecutionMode,
     ) -> AgentRunRequest:
         if request is not None:
@@ -239,6 +259,7 @@ class AgentSystemRunner:
             repo_url=repo_url,
             audit_id=audit_id,
             ref=ref,
+            audit_mode=audit_mode,
             selected_agents=list(selected_agents or []),
             execution_mode=execution_mode,
         )
@@ -292,7 +313,8 @@ class AgentSystemRunner:
 
         planned_agents = set(work_plan.planned_agents)
         selected: list[str] = []
-        for name in DEFAULT_SPECIALIST_ORDER:
+        specialist_order = DEEP_SPECIALIST_ORDER if request.audit_mode == "deep" else FAST_SPECIALIST_ORDER
+        for name in specialist_order:
             if name == "authz":
                 should_run = "authz" in planned_agents or "auth" in planned_agents
             else:
@@ -421,6 +443,7 @@ async def run_agent_system(
     audit_id: str | None = None,
     ref: str | None = None,
     selected_agents: Sequence[str] | None = None,
+    audit_mode: AuditMode = "fast",
     execution_mode: AgentExecutionMode = "auto",
     execution_session: ExecutionSession | None = None,
     execution_selection: ExecutionBackendSelection | None = None,
@@ -433,6 +456,7 @@ async def run_agent_system(
         audit_id=audit_id,
         ref=ref,
         selected_agents=selected_agents,
+        audit_mode=audit_mode,
         execution_mode=execution_mode,
         execution_session=execution_session,
         execution_selection=execution_selection,

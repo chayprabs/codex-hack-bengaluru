@@ -1,5 +1,6 @@
-import type { Audit, CoverageBand } from "@/lib/types";
+import type { Audit } from "@/lib/types";
 import { formatScore } from "@/lib/format";
+import { formatAuditLabel, toneFromCoverageBand } from "@/lib/coveragePresentation";
 import { cn, titleCase } from "@/lib/utils";
 import { StatusBadge, type StatusBadgeTone } from "@/components/StatusBadge";
 
@@ -45,39 +46,33 @@ function resolveText(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function toneFromCoverageBand(band: CoverageBand | null | undefined): StatusBadgeTone {
-  switch (band) {
-    case "deep":
-      return "success";
-    case "broad":
-      return "info";
-    case "targeted":
-      return "warning";
-    case "limited":
-    case "minimal":
-      return "danger";
-    default:
-      return "neutral";
-  }
-}
-
 function surfaceState(
   key: CoverageSurfaceDefinition["key"],
   {
     supportedAreas,
     partialAreas,
     unsupportedAreas,
+    manualReviewAreas,
     hasSignals,
   }: {
     supportedAreas: string[];
     partialAreas: string[];
     unsupportedAreas: string[];
+    manualReviewAreas: string[];
     hasSignals: boolean;
   },
 ): CoverageSurfaceState {
+  if (manualReviewAreas.includes(key)) {
+    return {
+      label: "Needs manual review",
+      tone: "info",
+      detail: "Mapped, but this surface still needs a human pass before the result is treated as settled.",
+    };
+  }
+
   if (supportedAreas.includes(key)) {
     return {
-      label: "Covered",
+      label: "Supported",
       tone: "success",
       detail: "Mapped and exercised by specialist checks.",
     };
@@ -85,7 +80,7 @@ function surfaceState(
 
   if (partialAreas.includes(key)) {
     return {
-      label: "Partial",
+      label: "Partially supported",
       tone: "warning",
       detail: "Mapped, but only part of the surface was checked.",
     };
@@ -93,9 +88,9 @@ function surfaceState(
 
   if (unsupportedAreas.includes(key)) {
     return {
-      label: "Not checked",
-      tone: "danger",
-      detail: "Mapped, but this surface did not get full automated coverage.",
+      label: "Unsupported",
+      tone: "neutral",
+      detail: "Mapped, but this surface sits outside the current automated support path for this run.",
     };
   }
 
@@ -191,7 +186,7 @@ function CheckSummary({
               key={`${title}-${item}`}
               className="rounded-full border border-white/80 bg-white/85 px-3 py-1 font-mono text-[11px] font-semibold tracking-[0.04em] text-slate-700"
             >
-              {item}
+              {formatAuditLabel(item)}
             </span>
           ))
         ) : (
@@ -208,6 +203,8 @@ export function CoveragePanel({ audit, className }: Readonly<CoveragePanelProps>
   const supportedAreas = resolveList(audit?.supported_areas);
   const partialAreas = resolveList(audit?.partially_supported_areas);
   const unsupportedAreas = resolveList(audit?.unsupported_areas);
+  const manualReviewAreas = resolveList(audit?.needs_manual_review_areas);
+  const unsupportedTechnologies = resolveList(audit?.unsupported_technologies);
   const frameworksDetected = resolveList(audit?.frameworks_detected);
   const checksRun = resolveList(audit?.checks_run);
   const checksSkipped = resolveList(audit?.checks_skipped);
@@ -225,6 +222,8 @@ export function CoveragePanel({ audit, className }: Readonly<CoveragePanelProps>
     supportedAreas.length > 0 ||
     partialAreas.length > 0 ||
     unsupportedAreas.length > 0 ||
+    manualReviewAreas.length > 0 ||
+    unsupportedTechnologies.length > 0 ||
     checksRun.length > 0 ||
     checksSkipped.length > 0;
 
@@ -233,18 +232,23 @@ export function CoveragePanel({ audit, className }: Readonly<CoveragePanelProps>
     : hasSignals
       ? "No framework signal was mapped for this repo."
       : "Framework detection will appear after repo mapping completes.";
+  const unsupportedTechnologySummary = unsupportedTechnologies.length
+    ? unsupportedTechnologies.join(", ")
+    : hasSignals
+      ? "No unsupported tech signal was reported in this run."
+      : "Unsupported-tech signals appear after repo mapping completes.";
 
   const checkedDescription = checksRun.length
-    ? "Specialist lanes that actually executed in this room."
+    ? "Checks that actually ran in this audit."
     : hasSignals
-      ? "No specialist checks have completed yet."
-      : "Checks will appear here once planning and execution start.";
+      ? "No checks have completed yet."
+      : "Checks will appear here once the audit starts.";
 
   const skippedDescription = checksSkipped.length
-    ? "Lanes that were skipped or left unsupported in this run."
+    ? "Checks skipped or out of scope in this run."
     : hasSignals
-      ? "No skipped specialist lanes have been reported."
-      : "Skipped coverage will appear if the audit has to defer a surface.";
+      ? "No skipped checks were reported."
+      : "Skipped checks will appear here if the audit has to defer scope.";
 
   return (
     <section
@@ -257,9 +261,9 @@ export function CoveragePanel({ audit, className }: Readonly<CoveragePanelProps>
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="max-w-3xl">
           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Coverage map</p>
-          <h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-slate-950">What this audit actually covered</h2>
+          <h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-slate-950">What was checked</h2>
           <p className="mt-2 text-sm leading-6 text-slate-600">
-            {coverageSummary || "Repo scope, specialist coverage, and unsupported surfaces will appear here as the room gathers evidence."}
+            {coverageSummary || "What the audit reached, what it skipped, and where human review is still needed."}
           </p>
         </div>
 
@@ -306,15 +310,17 @@ export function CoveragePanel({ audit, className }: Readonly<CoveragePanelProps>
           )}
         >
           <p className={cn("text-xs font-semibold uppercase tracking-[0.18em]", confidenceLimited ? "text-amber-700" : "text-slate-500")}>
-            Credibility
+            Score support
           </p>
           <p className="mt-3 font-mono text-2xl font-semibold tracking-[-0.03em] text-slate-950">
             {checksRun.length + checksSkipped.length > 0 ? `${checksRun.length}/${checksRun.length + checksSkipped.length}` : "Waiting"}
           </p>
           <p className={cn("mt-2 text-sm leading-6", confidenceLimited ? "text-amber-900" : "text-slate-600")}>
             {confidenceLimited
-              ? "Coverage is still partial, so TrustScore should be read with caution."
-              : "Coverage and execution signals are strong enough to support the current score."}
+              ? manualReviewAreas.length || unsupportedTechnologies.length
+                ? "Some areas stayed unsupported or manual-only, so treat the score as a first read."
+                : "Coverage is still partial, so treat the score as a first read."
+              : "Coverage is strong enough to support the current score inside the audited scope."}
           </p>
         </div>
       </div>
@@ -322,10 +328,10 @@ export function CoveragePanel({ audit, className }: Readonly<CoveragePanelProps>
       <div className="mt-6 rounded-[1.25rem] border border-slate-200 bg-white/78 p-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Frameworks detected</p>
-            <p className="mt-2 text-sm leading-6 text-slate-600">
-              Technical repo signals from the mapper. These help explain why certain specialist lanes were selected.
-            </p>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Frameworks detected</p>
+              <p className="mt-2 text-sm leading-6 text-slate-600">
+              Repo signals that shaped which checks ran.
+              </p>
           </div>
         </div>
 
@@ -345,6 +351,26 @@ export function CoveragePanel({ audit, className }: Readonly<CoveragePanelProps>
             </span>
           )}
         </div>
+
+        <div className="mt-5 border-t border-slate-200 pt-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Unsupported tech</p>
+          <p className="mt-2 text-sm leading-6 text-slate-600">
+            {unsupportedTechnologySummary}
+          </p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {unsupportedTechnologies.length ? (
+              unsupportedTechnologies.map((technology) => (
+                <StatusBadge key={technology} tone="warning" mono size="sm">
+                  Unsupported {technology}
+                </StatusBadge>
+              ))
+            ) : (
+              <span className="rounded-full border border-dashed border-slate-300 px-3 py-1 font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                None reported
+              </span>
+            )}
+          </div>
+        </div>
       </div>
 
       <div className="mt-6 grid gap-3 sm:grid-cols-2">
@@ -353,6 +379,7 @@ export function CoveragePanel({ audit, className }: Readonly<CoveragePanelProps>
             supportedAreas,
             partialAreas,
             unsupportedAreas,
+            manualReviewAreas,
             hasSignals,
           });
 
@@ -379,25 +406,26 @@ export function CoveragePanel({ audit, className }: Readonly<CoveragePanelProps>
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Area tags</p>
             <p className="mt-2 text-sm leading-6 text-slate-600">
-              Surface tags separate clearly covered slices from partial or unsupported ones.
+              Keep supported, partial, unsupported, and manual-only scope visible.
             </p>
           </div>
 
           <TagCloud title="Supported" items={supportedAreas} tone="success" emptyLabel="None yet" />
-          <TagCloud title="Partial" items={partialAreas} tone="warning" emptyLabel="None" />
-          <TagCloud title="Unsupported" items={unsupportedAreas} tone="danger" emptyLabel="None" />
+          <TagCloud title="Partially supported" items={partialAreas} tone="warning" emptyLabel="None" />
+          <TagCloud title="Unsupported" items={unsupportedAreas} tone="neutral" emptyLabel="None" />
+          <TagCloud title="Needs manual review" items={manualReviewAreas} tone="info" emptyLabel="None" />
         </div>
 
         <div className="grid gap-3 md:grid-cols-2">
           <CheckSummary
-            title="What we checked"
+            title="Checks run"
             description={checkedDescription}
             items={checksRun}
             tone="info"
             emptyLabel="No checks yet"
           />
           <CheckSummary
-            title="What we did not check"
+            title="Checks skipped"
             description={skippedDescription}
             items={checksSkipped}
             tone={checksSkipped.length ? "warning" : "neutral"}

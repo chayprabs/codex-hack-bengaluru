@@ -81,7 +81,7 @@ class DependencyAgent(BaseAgent):
     description = "Checks mapped manifests and lockfiles for reproducibility and dependency hygiene issues."
     repo_map_inputs = ("manifests", "lockfiles", "config")
 
-    def __init__(self, *, max_files: int = 40, max_findings: int = 24) -> None:
+    def __init__(self, *, max_files: int = 40, max_findings: int = 18) -> None:
         self.max_files = max_files
         self.max_findings = max_findings
 
@@ -241,69 +241,97 @@ class DependencyAgent(BaseAgent):
             )
 
         scripts = payload.get("scripts")
+        remote_scripts: list[str] = []
+        review_scripts: list[str] = []
         if isinstance(scripts, dict):
             for script_name in LIFECYCLE_SCRIPT_NAMES:
                 raw_script = scripts.get(script_name)
                 if not isinstance(raw_script, str) or not raw_script.strip():
                     continue
+                excerpt = f"{script_name}: {trim_output(raw_script, limit=120)}"
                 lowered = raw_script.lower()
-                is_remote = any(marker in lowered for marker in REMOTE_FETCH_MARKERS)
-                findings.append(
-                    self._finding(
-                        kind="remote_install_script" if is_remote else "install_script_review",
-                        severity="medium" if is_remote else "low",
-                        confidence="medium" if is_remote else "low",
-                        title="Install lifecycle script fetches remote code" if is_remote else "Install lifecycle script deserves supply-chain review",
-                        description=(
-                            "This package lifecycle script appears to fetch or shell into remote code during install."
-                            if is_remote
-                            else "This package defines an install lifecycle script, which is worth reviewing because it executes automatically during dependency installation."
-                        ),
-                        file_path=relative_path,
-                        evidence_excerpt=f"{script_name}: {trim_output(raw_script, limit=140)}",
-                        suggested_remediation=(
-                            "Remove the remote fetch from the install path or pin it behind a reviewed build step."
-                            if is_remote
-                            else "Review whether the lifecycle script is necessary and document or minimize it if it must run during install."
-                        ),
-                    )
+                if any(marker in lowered for marker in REMOTE_FETCH_MARKERS):
+                    remote_scripts.append(excerpt)
+                else:
+                    review_scripts.append(excerpt)
+        if remote_scripts:
+            findings.append(
+                self._finding(
+                    kind="remote_install_script",
+                    severity="medium",
+                    confidence="medium",
+                    title="Install lifecycle scripts fetch or shell into remote code",
+                    description=(
+                        "This package runs install-time scripts that appear to fetch or shell into remote code during dependency installation."
+                    ),
+                    file_path=relative_path,
+                    evidence_excerpt=" | ".join(remote_scripts[:2]),
+                    suggested_remediation="Remove the remote fetch from the install path or pin it behind a reviewed build step.",
                 )
+            )
+        elif review_scripts:
+            findings.append(
+                self._finding(
+                    kind="install_script_review",
+                    severity="low",
+                    confidence="low",
+                    title="Install lifecycle scripts deserve supply-chain review",
+                    description=(
+                        "This package defines install-time lifecycle scripts, which are worth reviewing because they run automatically during dependency installation."
+                    ),
+                    file_path=relative_path,
+                    evidence_excerpt=" | ".join(review_scripts[:2]),
+                    suggested_remediation="Review whether the lifecycle script is necessary and document or minimize it if it must run during install.",
+                )
+            )
 
+        floating_versions: list[str] = []
+        git_dependencies: list[str] = []
+        risky_dependencies: list[tuple[str, FindingSeverity, str]] = []
         for name, version in self._package_json_versions(payload):
             if version in {"*", "latest"}:
-                findings.append(
-                    self._finding(
-                        kind="floating_version",
-                        severity="medium",
-                        confidence="medium",
-                        title="Package uses a fully floating dependency version",
-                        description=f"`{name}` is pinned to `{version}`, which removes reproducibility for installs.",
-                        file_path=relative_path,
-                        evidence_excerpt=f"{name}: {version}",
-                        suggested_remediation="Use a bounded semver range or lock the dependency through the package lockfile.",
-                    )
-                )
+                floating_versions.append(f"{name}: {version}")
             elif version.startswith(("git+", "github:", "http://", "https://")):
-                findings.append(
-                    self._finding(
-                        kind="git_dependency",
-                        severity="low",
-                        confidence="medium",
-                        title="Package depends on a git or URL source",
-                        description=f"`{name}` resolves from a git or URL source instead of a registry release.",
-                        file_path=relative_path,
-                        evidence_excerpt=f"{name}: {version}",
-                        suggested_remediation="Review whether this dependency should be replaced with a pinned registry release.",
-                    )
-                )
-            finding = self._high_risk_dependency_finding(
+                git_dependencies.append(f"{name}: {version}")
+            risky = self._high_risk_dependency_details(
                 relative_path,
                 ecosystem="node",
                 package_name=name,
                 version=version,
             )
-            if finding is not None:
-                findings.append(finding)
+            if risky is not None:
+                risky_dependencies.append(risky)
+
+        if floating_versions:
+            findings.append(
+                self._finding(
+                    kind="floating_version",
+                    severity="low",
+                    confidence="medium",
+                    title="Manifest uses fully floating dependency versions",
+                    description=(
+                        "This manifest uses `*` or `latest` for one or more dependencies, which makes installs less reproducible."
+                    ),
+                    file_path=relative_path,
+                    evidence_excerpt=", ".join(floating_versions[:3]),
+                    suggested_remediation="Use bounded semver ranges or lock the dependency through the package lockfile.",
+                )
+            )
+        if git_dependencies:
+            findings.append(
+                self._finding(
+                    kind="git_dependency",
+                    severity="low",
+                    confidence="medium",
+                    title="Manifest depends on git or URL sources",
+                    description="One or more dependencies resolve from git or URL sources instead of registry releases.",
+                    file_path=relative_path,
+                    evidence_excerpt=", ".join(git_dependencies[:3]),
+                    suggested_remediation="Review whether these dependencies should be replaced with pinned registry releases.",
+                )
+            )
+        if risky_dependencies:
+            findings.append(self._group_high_risk_dependency_finding(relative_path, risky_dependencies))
         return findings
 
     def _analyze_pyproject(
@@ -348,27 +376,31 @@ class DependencyAgent(BaseAgent):
                 )
             )
 
-        for name, value in self._pyproject_git_sources(payload):
+        git_sources = self._pyproject_git_sources(payload)
+        if git_sources:
             findings.append(
                 self._finding(
                     kind="git_dependency",
                     severity="low",
                     confidence="medium",
-                    title="Python dependency uses a git or URL source",
-                    description=f"`{name}` resolves from a git or URL source instead of a packaged release.",
+                    title="Python dependencies use git or URL sources",
+                    description="One or more Python dependencies resolve from git or URL sources instead of packaged releases.",
                     file_path=relative_path,
-                    evidence_excerpt=f"{name}: {value}",
-                    suggested_remediation="Review whether this dependency should be replaced with a pinned release artifact.",
+                    evidence_excerpt=", ".join(f"{name}: {trim_output(value, limit=60)}" for name, value in git_sources[:2]),
+                    suggested_remediation="Review whether these dependencies should be replaced with pinned release artifacts.",
                 )
             )
+        risky_dependencies: list[tuple[str, FindingSeverity, str]] = []
         for name in self._pyproject_dependency_names(payload):
-            finding = self._high_risk_dependency_finding(
+            risky = self._high_risk_dependency_details(
                 relative_path,
                 ecosystem="python",
                 package_name=name,
             )
-            if finding is not None:
-                findings.append(finding)
+            if risky is not None:
+                risky_dependencies.append(risky)
+        if risky_dependencies:
+            findings.append(self._group_high_risk_dependency_finding(relative_path, risky_dependencies))
         return findings
 
     def _analyze_requirements(self, relative_path: str, file_path: Path) -> list[DependencyFinding]:
@@ -377,50 +409,57 @@ class DependencyAgent(BaseAgent):
             return []
 
         findings: list[DependencyFinding] = []
+        git_entries: list[tuple[int, str]] = []
+        unpinned_entries: list[tuple[int, str]] = []
+        risky_dependencies: list[tuple[str, FindingSeverity, str]] = []
         for line_number, raw_line in enumerate(text.splitlines(), start=1):
             line = raw_line.strip()
             if not line or line.startswith("#"):
                 continue
             if line.startswith(("-e ", "git+", "http://", "https://")):
-                findings.append(
-                    self._finding(
-                        kind="git_dependency",
-                        severity="low",
-                        confidence="medium",
-                        title="Requirements file uses an editable, git, or URL dependency",
-                        description="This requirements entry resolves from an editable path, git source, or direct URL.",
-                        file_path=relative_path,
-                        line_start=line_number,
-                        evidence_excerpt=trim_output(raw_line, limit=180),
-                        suggested_remediation="Review whether this dependency should be replaced with a pinned package release.",
-                    )
-                )
+                git_entries.append((line_number, trim_output(raw_line, limit=160)))
                 continue
             package_name = self._requirement_name(line)
             if package_name:
-                finding = self._high_risk_dependency_finding(
+                risky = self._high_risk_dependency_details(
                     relative_path,
                     ecosystem="python",
                     package_name=package_name,
-                    line_start=line_number,
-                    evidence_excerpt=trim_output(raw_line, limit=180),
                 )
-                if finding is not None:
-                    findings.append(finding)
+                if risky is not None:
+                    risky_dependencies.append((risky[0], risky[1], trim_output(raw_line, limit=160)))
             if "==" not in line and not line.startswith("-"):
-                findings.append(
-                    self._finding(
-                        kind="floating_version",
-                        severity="low",
-                        confidence="low",
-                        title="Requirements entry is not fully pinned",
-                        description="This requirements entry is not pinned to an exact version.",
-                        file_path=relative_path,
-                        line_start=line_number,
-                        evidence_excerpt=trim_output(raw_line, limit=180),
-                        suggested_remediation="Review whether this dependency should be pinned for reproducible installs.",
-                    )
+                unpinned_entries.append((line_number, trim_output(raw_line, limit=160)))
+        if git_entries:
+            findings.append(
+                self._finding(
+                    kind="git_dependency",
+                    severity="low",
+                    confidence="medium",
+                    title="Requirements file uses editable, git, or URL dependencies",
+                    description="One or more requirements entries resolve from editable paths, git sources, or direct URLs.",
+                    file_path=relative_path,
+                    line_start=git_entries[0][0],
+                    evidence_excerpt=" | ".join(entry for _, entry in git_entries[:2]),
+                    suggested_remediation="Review whether these dependencies should be replaced with pinned package releases.",
                 )
+            )
+        if risky_dependencies:
+            findings.append(self._group_high_risk_dependency_finding(relative_path, risky_dependencies))
+        if unpinned_entries:
+            findings.append(
+                self._finding(
+                    kind="floating_version",
+                    severity="low",
+                    confidence="low",
+                    title="Requirements file contains unpinned entries",
+                    description="One or more requirements entries are not pinned to exact versions.",
+                    file_path=relative_path,
+                    line_start=unpinned_entries[0][0],
+                    evidence_excerpt=" | ".join(entry for _, entry in unpinned_entries[:2]),
+                    suggested_remediation="Review whether these dependencies should be pinned for reproducible installs.",
+                )
+            )
         return findings
 
     def _analyze_pipfile(
@@ -449,18 +488,21 @@ class DependencyAgent(BaseAgent):
             ]
 
         findings: list[DependencyFinding] = []
+        risky_dependencies: list[tuple[str, FindingSeverity, str]] = []
         for section_name in ("packages", "dev-packages"):
             section = payload.get(section_name)
             if not isinstance(section, dict):
                 continue
             for name in section.keys():
-                finding = self._high_risk_dependency_finding(
+                risky = self._high_risk_dependency_details(
                     relative_path,
                     ecosystem="python",
                     package_name=str(name),
                 )
-                if finding is not None:
-                    findings.append(finding)
+                if risky is not None:
+                    risky_dependencies.append(risky)
+        if risky_dependencies:
+            findings.append(self._group_high_risk_dependency_finding(relative_path, risky_dependencies))
 
         parent = Path(relative_path).parent.as_posix()
         if not self._relative_exists(file_map, parent, "pipfile.lock"):
@@ -565,33 +607,40 @@ class DependencyAgent(BaseAgent):
         token = token.strip().lower()
         return token or None
 
-    def _high_risk_dependency_finding(
+    def _high_risk_dependency_details(
         self,
         file_path: str,
         *,
         ecosystem: Literal["node", "python"],
         package_name: str,
         version: str = "",
-        line_start: int | None = None,
-        evidence_excerpt: str = "",
-    ) -> DependencyFinding | None:
+    ) -> tuple[str, FindingSeverity, str] | None:
         normalized = package_name.strip().lower()
         package_map = HIGH_RISK_NODE_PACKAGES if ecosystem == "node" else HIGH_RISK_PYTHON_PACKAGES
         details = package_map.get(normalized)
         if details is None:
             return None
         reason, severity = details
-        evidence = evidence_excerpt or f"{normalized}: {version}".strip(": ")
+        evidence = f"{normalized}: {version}".strip(": ")
+        return (normalized, severity, f"{evidence} ({reason})")
+
+    def _group_high_risk_dependency_finding(
+        self,
+        file_path: str,
+        risky_dependencies: list[tuple[str, FindingSeverity, str]],
+    ) -> DependencyFinding:
+        unique = {name: (severity, evidence) for name, severity, evidence in risky_dependencies}
+        severity: FindingSeverity = "high" if any(level == "high" for level, _ in unique.values()) else "medium"
+        evidence_excerpt = ", ".join(evidence for _, evidence in list(unique.values())[:3])
         return self._finding(
             kind="high_risk_dependency",
             severity=severity,
             confidence="medium",
-            title="Project depends on a stale or historically risky package",
-            description=f"`{normalized}` deserves review. {reason}",
+            title="Project depends on stale or historically risky packages",
+            description="One or more dependencies deserve review because they are unmaintained or have a history of serious security issues.",
             file_path=file_path,
-            line_start=line_start,
-            evidence_excerpt=evidence,
-            suggested_remediation="Review whether this dependency can be upgraded, replaced, or isolated behind stronger supply-chain controls.",
+            evidence_excerpt=evidence_excerpt,
+            suggested_remediation="Review whether these dependencies can be upgraded, replaced, or isolated behind stronger supply-chain controls.",
         )
 
     def _relative_exists(self, file_map: dict[str, Path], parent: str, name: str) -> bool:

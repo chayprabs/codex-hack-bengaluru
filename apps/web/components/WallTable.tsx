@@ -6,7 +6,17 @@ import { formatDateTime, formatRelativeTime, formatScore } from "@/lib/format";
 import { cn, formatSeverityLabel, repoLabelFromUrl, shortId } from "@/lib/utils";
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorState } from "@/components/ErrorState";
-import { StatusBadge, toneFromSeverity, type StatusBadgeTone } from "@/components/StatusBadge";
+import {
+  formatFindingConfidenceBadgeLabel,
+  formatFindingProofBadgeLabel,
+  formatFindingVerificationBadgeLabel,
+  StatusBadge,
+  toneFromFindingConfidence,
+  toneFromFindingProofType,
+  toneFromFindingVerificationState,
+  toneFromSeverity,
+  type StatusBadgeTone,
+} from "@/components/StatusBadge";
 
 type WallTableProps = {
   entries?: WallEntry[];
@@ -45,10 +55,10 @@ export function WallTable({
   entries = [],
   isLoading = false,
   errorMessage,
-  title = "Shame wall",
-  description = "Latest surfaced findings across audits.",
-  emptyTitle = "The wall is empty",
-  emptyDescription = "Findings will appear here once audits start reporting issues.",
+  title = "Audit wall",
+  description = "Recent findings across all audits.",
+  emptyTitle = "No findings on the wall",
+  emptyDescription = "Findings appear here as audits report issues.",
   getAuditHref,
   renderActions,
   rankEntries = false,
@@ -78,8 +88,8 @@ export function WallTable({
         {!isLoading && errorMessage ? (
           <ErrorState
             compact
-            title="Wall data unavailable"
-            description="The findings leaderboard could not be loaded."
+            title="Wall unavailable"
+            description="Could not load ranked findings."
             message={errorMessage}
           />
         ) : null}
@@ -96,9 +106,13 @@ export function WallTable({
                   const href = getAuditHref?.(entry);
                   const trustScore = getTrustScore?.(entry);
                   const trustTier = getTrustTier?.(entry);
+                  const attributionLabel = [entry.agent_name, entry.check_name].filter(Boolean).join(" / ");
+                  const confidenceLabel = formatFindingConfidenceBadgeLabel(entry.confidence);
+                  const proofLabel = formatFindingProofBadgeLabel(entry.proof_type);
+                  const verificationLabel = formatFindingVerificationBadgeLabel(entry.verification_state);
 
                   return (
-                    <li key={`${entry.audit_id}-${entry.title}-${entry.created_at}`}>
+                    <li key={entry.finding_id}>
                       <article className="rounded-[1.5rem] border border-slate-200 bg-slate-50/85 p-4">
                         <div className="flex flex-wrap items-center gap-3">
                           {rankEntries ? (
@@ -116,6 +130,21 @@ export function WallTable({
                         </div>
 
                         <h3 className="mt-4 text-lg font-semibold text-slate-950">{entry.title}</h3>
+                        <p className="mt-2 text-sm leading-6 text-slate-600">{entry.impact_summary}</p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <StatusBadge size="sm" tone={toneFromFindingConfidence(entry.confidence)}>
+                            {confidenceLabel}
+                          </StatusBadge>
+                          <StatusBadge size="sm" tone={toneFromFindingProofType(entry.proof_type)}>
+                            {proofLabel}
+                          </StatusBadge>
+                          <StatusBadge size="sm" tone={toneFromFindingVerificationState(entry.verification_state)}>
+                            {verificationLabel}
+                          </StatusBadge>
+                        </div>
+                        {attributionLabel ? (
+                          <p className="mt-2 font-mono text-xs uppercase tracking-[0.16em] text-slate-500">{attributionLabel}</p>
+                        ) : null}
                         <dl
                           className={cn(
                             "mt-4 grid gap-3 text-sm text-slate-600",
@@ -124,7 +153,7 @@ export function WallTable({
                         >
                           {trustScore !== null && trustScore !== undefined ? (
                             <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
-                              <dt className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Trust score</dt>
+                              <dt className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Score</dt>
                               <dd className="mt-2 font-mono text-2xl font-semibold text-slate-950">
                                 {formatScore(trustScore)}
                               </dd>
@@ -147,7 +176,7 @@ export function WallTable({
                                 href={href}
                                 className="inline-flex min-h-10 items-center rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-800 transition hover:border-slate-300 hover:bg-slate-100"
                               >
-                                Open audit
+                                View audit
                               </Link>
                             ) : null}
                             {renderActions?.(entry)}
@@ -162,7 +191,7 @@ export function WallTable({
 
             <div className="hidden overflow-hidden rounded-[1.5rem] border border-slate-200 md:block">
               <table className="min-w-full border-collapse">
-                <caption className="sr-only">Latest findings across audits</caption>
+                <caption className="sr-only">Recent findings across audits</caption>
                 <thead className="bg-slate-50/90">
                   <tr className="text-left">
                     {rankEntries ? (
@@ -175,7 +204,7 @@ export function WallTable({
                     </th>
                     {hasTrustSignals ? (
                       <th scope="col" className="px-4 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                        Trust
+                        Score
                       </th>
                     ) : null}
                     <th scope="col" className="px-4 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
@@ -199,9 +228,13 @@ export function WallTable({
                     const href = getAuditHref?.(entry);
                     const trustScore = getTrustScore?.(entry);
                     const trustTier = getTrustTier?.(entry);
+                    const attributionLabel = [entry.agent_name, entry.check_name].filter(Boolean).join(" / ");
+                    const confidenceLabel = formatFindingConfidenceBadgeLabel(entry.confidence);
+                    const proofLabel = formatFindingProofBadgeLabel(entry.proof_type);
+                    const verificationLabel = formatFindingVerificationBadgeLabel(entry.verification_state);
 
                     return (
-                      <tr key={`${entry.audit_id}-${entry.title}-${entry.created_at}`} className="align-top">
+                      <tr key={entry.finding_id} className="align-top">
                         {rankEntries ? (
                           <td className="px-4 py-4">
                             <span className="inline-flex h-10 min-w-10 items-center justify-center rounded-full border border-slate-200 bg-slate-50 px-3 font-mono text-sm font-semibold text-slate-700">
@@ -210,14 +243,26 @@ export function WallTable({
                           </td>
                         ) : null}
                         <td className="px-4 py-4">
-                          <div className="flex flex-wrap items-center gap-3">
-                            <StatusBadge tone={toneFromSeverity(entry.severity)}>
-                              {formatSeverityLabel(entry.severity)}
-                            </StatusBadge>
+                          <div className="space-y-3">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <StatusBadge tone={toneFromSeverity(entry.severity)}>
+                                {formatSeverityLabel(entry.severity)}
+                              </StatusBadge>
+                              <StatusBadge size="sm" tone={toneFromFindingConfidence(entry.confidence)}>
+                                {confidenceLabel}
+                              </StatusBadge>
+                              <StatusBadge size="sm" tone={toneFromFindingProofType(entry.proof_type)}>
+                                {proofLabel}
+                              </StatusBadge>
+                              <StatusBadge size="sm" tone={toneFromFindingVerificationState(entry.verification_state)}>
+                                {verificationLabel}
+                              </StatusBadge>
+                            </div>
                             <div>
                               <p className="font-semibold text-slate-950">{entry.title}</p>
-                              <p className="mt-1 text-sm text-slate-500">
-                                Surfaced {formatRelativeTime(entry.created_at)}
+                              <p className="mt-1 text-sm text-slate-500">{entry.impact_summary}</p>
+                              <p className="mt-1 text-xs font-mono uppercase tracking-[0.16em] text-slate-400">
+                                {attributionLabel || `Surfaced ${formatRelativeTime(entry.created_at)}`}
                               </p>
                             </div>
                           </div>
@@ -245,7 +290,7 @@ export function WallTable({
                                   href={href}
                                   className="inline-flex min-h-10 items-center rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-800 transition hover:border-slate-300 hover:bg-slate-100"
                                 >
-                                  Open audit
+                                  View audit
                                 </Link>
                               ) : null}
                               {renderActions?.(entry)}

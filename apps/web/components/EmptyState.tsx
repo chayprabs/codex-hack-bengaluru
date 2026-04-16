@@ -14,7 +14,7 @@ type EmptyStateProps = {
 export function EmptyState({
   title,
   description,
-  eyebrow = "No data",
+  eyebrow = "Waiting",
   action,
   className,
   compact = false,
@@ -22,7 +22,7 @@ export function EmptyState({
   return (
     <section
       className={cn(
-        "rounded-[1.5rem] border border-dashed border-slate-300 bg-slate-50/90 text-slate-700",
+        "rounded-[1.5rem] border border-dashed border-slate-300 bg-[linear-gradient(135deg,rgba(248,250,252,0.96),rgba(255,255,255,0.94))] text-slate-700",
         compact ? "p-5" : "p-6 sm:p-8",
         className,
       )}

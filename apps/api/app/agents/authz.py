@@ -122,7 +122,7 @@ class AuthzAgent(BaseAgent):
     description = "Looks for authorization bypass flags, allow-all policy patterns, and weak authz coverage signals."
     repo_map_inputs = ("auth", "routes", "config", "database", "validation")
 
-    def __init__(self, *, max_files: int = 60, max_findings: int = 20) -> None:
+    def __init__(self, *, max_files: int = 60, max_findings: int = 16) -> None:
         self.max_files = max_files
         self.max_findings = max_findings
 
@@ -262,13 +262,13 @@ class AuthzAgent(BaseAgent):
             )
         )
 
-        coverage_finding = self._coverage_review(relative_path, text)
-        if coverage_finding is not None:
-            findings.append(coverage_finding)
-
         idor_finding = self._idor_review(relative_path, text)
         if idor_finding is not None:
             findings.append(idor_finding)
+
+        coverage_finding = self._coverage_review(relative_path, text)
+        if coverage_finding is not None and idor_finding is None:
+            findings.append(coverage_finding)
 
         return findings[: self.max_findings]
 
@@ -294,13 +294,16 @@ class AuthzAgent(BaseAgent):
         restrict_to_policy_file: bool,
     ) -> list[AuthzFinding]:
         lower_path = relative_path.lower()
+        lines = text.splitlines()
         findings: list[AuthzFinding] = []
-        for line_number, raw_line in enumerate(text.splitlines(), start=1):
+        for line_number, raw_line in enumerate(lines, start=1):
             if not pattern.search(raw_line):
                 continue
             if restrict_to_policy_file and not any(
                 token in lower_path or token in raw_line.lower() for token in AUTHZ_MARKERS
             ):
+                continue
+            if kind == "allow_all_policy" and not self._has_policy_context(lines, line_number):
                 continue
             findings.append(
                 AuthzFinding(
@@ -311,7 +314,7 @@ class AuthzAgent(BaseAgent):
                     description=description,
                     file_path=relative_path,
                     line_start=line_number,
-                    evidence_excerpt=trim_output(raw_line, limit=180),
+                    evidence_excerpt=trim_output(raw_line, limit=160),
                     suggested_remediation=suggested_remediation,
                 )
             )
@@ -329,7 +332,7 @@ class AuthzAgent(BaseAgent):
         line_number, excerpt = self._first_matching_line(text, SENSITIVE_AUTHZ_HINTS)
         return AuthzFinding(
             kind="suspicious_missing_authorization",
-            severity="medium",
+            severity="low",
             confidence="low",
             title="Sensitive route lacks an obvious authorization check",
             description=(
@@ -353,7 +356,7 @@ class AuthzAgent(BaseAgent):
         if any(marker in lower_text for marker in AUTHZ_MARKERS + OWNERSHIP_MARKERS):
             return None
 
-        line_number, excerpt = self._first_matching_line(text, IDOR_ID_HINTS)
+        line_number, excerpt = self._idor_evidence(text)
         return AuthzFinding(
             kind="idor_candidate",
             severity="medium",
@@ -372,8 +375,22 @@ class AuthzAgent(BaseAgent):
         for line_number, raw_line in enumerate(text.splitlines(), start=1):
             lower_line = raw_line.lower()
             if any(token in lower_line for token in tokens):
-                return line_number, trim_output(raw_line, limit=180)
+                return line_number, trim_output(raw_line, limit=160)
         return None, ""
+
+    def _idor_evidence(self, text: str) -> tuple[int | None, str]:
+        route_line: tuple[int | None, str] = self._first_matching_line(text, IDOR_ID_HINTS)
+        lookup_line: tuple[int | None, str] = self._first_matching_line(text, DATA_LOOKUP_MARKERS)
+        if route_line[0] is None:
+            return lookup_line
+        if lookup_line[0] is None or lookup_line[0] == route_line[0]:
+            return route_line
+        return route_line[0], f"{route_line[1]} | {lookup_line[1]}"
+
+    def _has_policy_context(self, lines: list[str], line_number: int) -> bool:
+        window_start = max(0, line_number - 3)
+        window_end = min(len(lines), line_number + 1)
+        return any(any(marker in lines[index].lower() for marker in AUTHZ_MARKERS) for index in range(window_start, window_end))
 
     def _build_summary(self, report: AuthzReport) -> str:
         if report.scanned_files == 0:

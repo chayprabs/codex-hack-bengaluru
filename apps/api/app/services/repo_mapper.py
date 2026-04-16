@@ -52,9 +52,16 @@ class RepoMapper:
         languages = self.file_classifier.detect_languages(snapshot.files)
         stacks = self.framework_detector.detect_frameworks(snapshot.files, text_snippets)
         package_managers = self.framework_detector.detect_package_managers(snapshot.files)
+        unsupported_technologies = self.framework_detector.detect_unsupported_technologies(
+            snapshot.files,
+            text_snippets,
+            package_managers=package_managers,
+            detected_stacks=stacks,
+        )
         key_files = self.file_classifier.build_key_files(snapshot.files, snapshot.directories, text_snippets)
         likely_entry_points = self.file_classifier.likely_entry_points(snapshot.files, text_snippets)
         top_folders = self.file_classifier.top_folders(snapshot.files)
+        manual_review_zones = self._detect_manual_review_zones(snapshot.files, key_files, likely_entry_points)
 
         repo_map = RepoMap(
             repo_name=root.name,
@@ -66,7 +73,9 @@ class RepoMapper:
             package_managers=package_managers,
             key_files=key_files,
             likely_entry_points=likely_entry_points,
-            unsupported_zones=self._detect_unsupported_zones(snapshot.files, key_files, likely_entry_points),
+            unsupported_technologies=unsupported_technologies,
+            needs_manual_review_zones=manual_review_zones,
+            unsupported_zones=manual_review_zones,
             scan=RepoMapScan(
                 scanned_directories=snapshot.scanned_directories,
                 scanned_files=snapshot.scanned_files,
@@ -229,18 +238,25 @@ class RepoMapper:
 
         snippets: dict[str, str] = {}
         for file in candidates[: self.max_text_files]:
-            try:
-                text = file.absolute_path.read_text(encoding="utf-8", errors="ignore")
-            except OSError:
+            text = self._read_text_prefix(file.absolute_path)
+            if text is None:
                 continue
-            snippets[file.relative_path] = text[: self.max_read_bytes].lower()
+            snippets[file.relative_path] = text.lower()
         return snippets
 
     def _should_skip_text_scan(self, file: ScannedFile) -> bool:
         excluded_parts = {"tests", "test", "docs", "examples"}
         return any(part in excluded_parts for part in file.parts_lower[:-1])
 
-    def _detect_unsupported_zones(
+    def _read_text_prefix(self, path: Path) -> str | None:
+        try:
+            with path.open("rb") as handle:
+                chunk = handle.read(self.max_read_bytes)
+        except OSError:
+            return None
+        return chunk.decode("utf-8", errors="ignore")
+
+    def _detect_manual_review_zones(
         self,
         files: list[ScannedFile],
         key_files,
@@ -286,7 +302,7 @@ class RepoMapper:
             zones.append(
                 RepoMapZone(
                     path=folder,
-                    reason="scanned folder with weak or no route/config/framework signals",
+                    reason="scanned folder with weak or no route/config/framework signals and may need manual review",
                 )
             )
             if len(zones) >= 6:
@@ -311,11 +327,22 @@ class RepoMapper:
         webhook_count = len(repo_map.key_files.webhooks)
         validation_count = len(repo_map.key_files.validation)
         middleware_count = len(repo_map.key_files.middleware)
+        unsupported_technology_count = len(repo_map.unsupported_technologies)
+        manual_review_zone_count = len(repo_map.needs_manual_review_zones)
         truncated = " Scan was truncated for speed." if repo_map.scan.truncated else ""
+        support_suffix = ""
+        if unsupported_technology_count or manual_review_zone_count:
+            support_suffix = (
+                f" Marked {unsupported_technology_count} unsupported technolog"
+                f"{'y' if unsupported_technology_count == 1 else 'ies'} and "
+                f"{manual_review_zone_count} manual-review zone"
+                f"{'' if manual_review_zone_count == 1 else 's'}."
+            )
         return (
             f"Detected {languages} repo with {stack_names}. "
             f"Package managers: {manager_names}. "
             f"Found {route_count} API routes, {auth_count} auth/session files, "
             f"{database_count} database files, {validation_count} validation files, "
-            f"{middleware_count} middleware files, and {webhook_count} webhook files.{truncated}"
+            f"{middleware_count} middleware files, and {webhook_count} webhook files."
+            f"{support_suffix}{truncated}"
         )

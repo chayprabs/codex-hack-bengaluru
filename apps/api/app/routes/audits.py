@@ -2,8 +2,12 @@ from fastapi import APIRouter, HTTPException, Request, status
 from starlette.responses import StreamingResponse
 
 from ..core.sse import build_audit_stream_response
-from ..models import Audit, CreateAuditRequest
-from ..services.audit_service import DemoAuditConfigurationError, audit_service
+from ..models import Audit, CreateAuditRequest, DemoSetupResponse
+from ..services.audit_service import (
+    DemoAuditConfigurationError,
+    DemoAuditProfileNotFoundError,
+    audit_service,
+)
 
 router = APIRouter(tags=["audits"])
 
@@ -20,10 +24,20 @@ def create_audit(payload: CreateAuditRequest) -> Audit:
     return audit_service.create_audit(payload)
 
 
+@router.get("/demo-setup", response_model=DemoSetupResponse)
+def get_demo_setup() -> DemoSetupResponse:
+    return audit_service.get_demo_setup()
+
+
 @router.post("/demo-audit", response_model=Audit, status_code=status.HTTP_201_CREATED)
-def create_demo_audit() -> Audit:
+def create_demo_audit(profile_key: str | None = None) -> Audit:
     try:
-        return audit_service.create_demo_audit()
+        return audit_service.create_demo_audit(profile_key=profile_key)
+    except DemoAuditProfileNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
     except DemoAuditConfigurationError as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

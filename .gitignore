@@ -15,6 +15,7 @@ logs/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+.trustlayer-dev.json
 
 __pycache__/
 *.pyc

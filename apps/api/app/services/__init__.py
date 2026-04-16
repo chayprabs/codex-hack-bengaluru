@@ -13,7 +13,18 @@ from .agent_runner import (
 from .audit_coverage import AuditCoverageService, AuditCoverageSnapshot, audit_coverage_service
 from .file_classifier import FileClassifier
 from .framework_detector import FrameworkDetector
+from .patch_verifier import (
+    PatchVerificationCheck,
+    PatchVerificationCheckStatus,
+    PatchVerificationRequest,
+    PatchVerificationResult,
+    PatchVerificationService,
+    PatchVerificationStatus,
+    patch_verification_service,
+    verify_patch,
+)
 from .repo_mapper import RepoMapper, RepoMapperError
+from .replay_vault import ReplayVaultService, replay_vault_service
 from .scoring import (
     ScoringService,
     TrustScoreBreakdown,
@@ -36,8 +47,15 @@ __all__ = [
     "AuditCoverageSnapshot",
     "FileClassifier",
     "FrameworkDetector",
+    "PatchVerificationCheck",
+    "PatchVerificationCheckStatus",
+    "PatchVerificationRequest",
+    "PatchVerificationResult",
+    "PatchVerificationService",
+    "PatchVerificationStatus",
     "RepoMapper",
     "RepoMapperError",
+    "ReplayVaultService",
     "ScoringService",
     "TrustScoreBreakdown",
     "TrustScoreCounts",
@@ -47,6 +65,9 @@ __all__ = [
     "agent_system_runner",
     "audit_coverage_service",
     "build_trust_score_summary",
+    "patch_verification_service",
+    "replay_vault_service",
     "run_agent_system",
     "scoring_service",
+    "verify_patch",
 ]

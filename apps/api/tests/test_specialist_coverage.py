@@ -33,6 +33,7 @@ class SpecialistCoverageTests(unittest.TestCase):
                 "authz",
                 "webhook",
                 "dependency",
+                "ai_guardrails",
                 "config_headers_cors",
                 "input_validation",
                 "frontend_runtime",
@@ -42,9 +43,64 @@ class SpecialistCoverageTests(unittest.TestCase):
 
         schema = shared_finding_schema()
         properties = schema.get("properties", {})
-        self.assertTrue({"confidence", "check_id", "category", "inputs", "checks", "evidence", "patch_suggestion"} <= set(properties))
+        self.assertTrue(
+            {
+                "agent_name",
+                "check_name",
+                "files",
+                "line_hints",
+                "impact_summary",
+                "technical_summary",
+                "evidence_snippet",
+                "confidence",
+                "proof_type",
+                "suggested_patch",
+                "verification_state",
+            }
+            <= set(properties)
+        )
 
     def test_planner_routes_repo_map_into_new_specialist_lanes(self) -> None:
+        repo_map = RepoMap(
+            repo_name="demo",
+            root_path="/tmp/demo",
+            summary="demo",
+            primary_stack="fastapi",
+            languages=["python", "typescript"],
+            stacks=[],
+            key_files=RepoMapKeyFiles(
+                auth=[RepoMapFile(path="apps/api/app/auth/session.py", reason="auth slice")],
+                routes=[RepoMapFile(path="apps/api/app/api/routes/users.py", reason="route slice")],
+                database=[RepoMapFile(path="apps/api/app/repositories/users.py", reason="db slice")],
+                middleware=[RepoMapFile(path="apps/api/app/core/middleware.py", reason="middleware slice")],
+                validation=[RepoMapFile(path="apps/api/app/schemas/user.py", reason="validation slice")],
+                webhooks=[RepoMapFile(path="apps/api/app/api/routes/webhooks.py", reason="webhook slice")],
+                ai_rules=[RepoMapFile(path=".cursorrules", reason="ai rules slice")],
+                frontend=[RepoMapFile(path="apps/web/app/page.tsx", reason="frontend slice")],
+                config=[RepoMapFile(path="apps/web/next.config.ts", reason="config slice")],
+                manifests=[RepoMapFile(path="apps/web/package.json", reason="manifest slice")],
+                lockfiles=[RepoMapFile(path="apps/web/package-lock.json", reason="lockfile slice")],
+            ),
+            scan=RepoMapScan(scanned_directories=10, scanned_files=50, truncated=False),
+        )
+
+        work_plan = RepoPlanner().plan(repo_map)
+        self.assertTrue(
+            {
+                "auth",
+                "authz",
+                "webhook",
+                "dependency",
+                "ai_guardrails",
+                "config_headers_cors",
+                "input_validation",
+                "frontend_runtime",
+                "build_type_lint",
+            }
+            <= set(work_plan.planned_agents)
+        )
+
+    def test_planner_mode_changes_breadth_of_assigned_checks(self) -> None:
         repo_map = RepoMap(
             repo_name="demo",
             root_path="/tmp/demo",
@@ -67,20 +123,15 @@ class SpecialistCoverageTests(unittest.TestCase):
             scan=RepoMapScan(scanned_directories=10, scanned_files=50, truncated=False),
         )
 
-        work_plan = RepoPlanner().plan(repo_map)
+        fast_plan = RepoPlanner(mode="fast", max_targets_per_agent=5).plan(repo_map)
+        deep_plan = RepoPlanner(mode="deep", max_targets_per_agent=12).plan(repo_map)
+
         self.assertTrue(
-            {
-                "auth",
-                "authz",
-                "webhook",
-                "dependency",
-                "config_headers_cors",
-                "input_validation",
-                "frontend_runtime",
-                "build_type_lint",
-            }
-            <= set(work_plan.planned_agents)
+            {"secrets", "auth", "webhook", "dependency", "config_headers_cors", "input_validation"}
+            <= set(fast_plan.planned_agents)
         )
+        self.assertFalse({"api_contract", "buildbreak", "typelint"} & set(fast_plan.planned_agents))
+        self.assertTrue({"api_contract", "buildbreak", "typelint"} <= set(deep_plan.planned_agents))
 
     def test_config_headers_cors_agent_finds_wildcard_credentials(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

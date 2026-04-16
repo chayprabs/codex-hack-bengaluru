@@ -5,7 +5,7 @@ import json
 import re
 import tomllib
 
-from ..models.repo_map import RepoMapFile, RepoMapPackageManager, RepoMapStack
+from ..models.repo_map import RepoMapFile, RepoMapPackageManager, RepoMapStack, RepoMapTechnology
 from .file_classifier import ScannedFile
 
 PACKAGE_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+")
@@ -31,6 +31,24 @@ class _PackageManagerHeuristic:
     lockfile_names: tuple[str, ...] = ()
     package_manager_tokens: tuple[str, ...] = ()
     pyproject_sections: tuple[tuple[str, ...], ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class _UnsupportedTechHeuristic:
+    slug: str
+    name: str
+    reason: str
+    manifest_names: tuple[str, ...] = ()
+    package_names: tuple[str, ...] = ()
+    file_names: tuple[str, ...] = ()
+    file_prefixes: tuple[str, ...] = ()
+    content_markers: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class _DetectionScore:
+    score: int
+    evidence: list[str]
 
 
 FRAMEWORK_HEURISTICS = (
@@ -223,11 +241,102 @@ PACKAGE_MANAGER_HEURISTICS = (
     ),
 )
 
+UNSUPPORTED_TECH_HEURISTICS = (
+    _UnsupportedTechHeuristic(
+        slug="nuxt",
+        name="Nuxt",
+        reason="Nuxt is detected, but the current specialist set does not provide first-class automated coverage for it yet.",
+        package_names=("nuxt",),
+        file_names=("nuxt.config.js", "nuxt.config.ts"),
+    ),
+    _UnsupportedTechHeuristic(
+        slug="remix",
+        name="Remix",
+        reason="Remix is detected, but the current specialist set does not provide first-class automated coverage for it yet.",
+        package_names=("@remix-run/react", "@remix-run/node", "@remix-run/dev"),
+        file_names=("remix.config.js", "remix.config.ts", "remix.config.mjs"),
+    ),
+    _UnsupportedTechHeuristic(
+        slug="sveltekit",
+        name="SvelteKit",
+        reason="SvelteKit is detected, but the current specialist set does not provide first-class automated coverage for it yet.",
+        package_names=("@sveltejs/kit",),
+        file_names=("svelte.config.js", "svelte.config.cjs", "svelte.config.mjs"),
+    ),
+    _UnsupportedTechHeuristic(
+        slug="astro",
+        name="Astro",
+        reason="Astro is detected, but the current specialist set does not provide first-class automated coverage for it yet.",
+        package_names=("astro",),
+        file_names=("astro.config.mjs", "astro.config.ts"),
+    ),
+    _UnsupportedTechHeuristic(
+        slug="rails",
+        name="Rails",
+        reason="Rails is detected, but the current specialist set does not provide first-class automated coverage for it yet.",
+        package_names=("rails",),
+        manifest_names=("gemfile",),
+        file_names=("config.ru",),
+        content_markers=("rails.application.routes.draw", "actioncontroller::base"),
+    ),
+    _UnsupportedTechHeuristic(
+        slug="laravel",
+        name="Laravel",
+        reason="Laravel is detected, but the current specialist set does not provide first-class automated coverage for it yet.",
+        package_names=("laravel/framework",),
+        manifest_names=("composer.json",),
+        file_names=("artisan",),
+    ),
+    _UnsupportedTechHeuristic(
+        slug="go_modules",
+        name="Go modules",
+        reason="Go modules are detected, but the current specialist set does not provide first-class automated coverage for them yet.",
+        manifest_names=("go.mod",),
+    ),
+    _UnsupportedTechHeuristic(
+        slug="cargo",
+        name="Cargo",
+        reason="Cargo is detected, but the current specialist set does not provide first-class automated coverage for it yet.",
+        manifest_names=("cargo.toml",),
+    ),
+    _UnsupportedTechHeuristic(
+        slug="bundler",
+        name="Bundler",
+        reason="Bundler is detected, but the current specialist set does not provide first-class automated coverage for it yet.",
+        manifest_names=("gemfile",),
+    ),
+    _UnsupportedTechHeuristic(
+        slug="composer",
+        name="Composer",
+        reason="Composer is detected, but the current specialist set does not provide first-class automated coverage for it yet.",
+        manifest_names=("composer.json",),
+    ),
+    _UnsupportedTechHeuristic(
+        slug="maven",
+        name="Maven",
+        reason="Maven is detected, but the current specialist set does not provide first-class automated coverage for it yet.",
+        manifest_names=("pom.xml",),
+    ),
+    _UnsupportedTechHeuristic(
+        slug="gradle",
+        name="Gradle",
+        reason="Gradle is detected, but the current specialist set does not provide first-class automated coverage for it yet.",
+        manifest_names=("build.gradle", "build.gradle.kts"),
+    ),
+)
+
 
 class FrameworkDetector:
-    def __init__(self, *, max_frameworks: int = 8, max_package_managers: int = 6) -> None:
+    def __init__(
+        self,
+        *,
+        max_frameworks: int = 8,
+        max_package_managers: int = 6,
+        max_unsupported_technologies: int = 6,
+    ) -> None:
         self.max_frameworks = max_frameworks
         self.max_package_managers = max_package_managers
+        self.max_unsupported_technologies = max_unsupported_technologies
 
     def detect_frameworks(
         self,
@@ -242,53 +351,27 @@ class FrameworkDetector:
 
         scored: list[tuple[int, int, RepoMapStack]] = []
         for heuristic in FRAMEWORK_HEURISTICS:
-            score = 0
-            evidence: list[str] = []
-
-            for manifest_name in heuristic.manifest_names:
-                for file in by_name.get(manifest_name, []):
-                    score += self._depth_weight(file.depth, base=3)
-                    evidence.append(f"manifest:{file.relative_path}")
-
-            for package_name in heuristic.package_names:
-                for source_path in sorted(dependency_sources.get(package_name, ())):
-                    score += 4
-                    evidence.append(f"dependency:{package_name} in {source_path}")
-
-            for file_name in heuristic.file_names:
-                for file in by_name.get(file_name, []):
-                    score += self._depth_weight(file.depth, base=3)
-                    evidence.append(f"file:{file.relative_path}")
-
-            for prefix in heuristic.file_prefixes:
-                for file in files:
-                    if file.lower_name.startswith(prefix):
-                        score += self._depth_weight(file.depth, base=3)
-                        evidence.append(f"file:{file.relative_path}")
-
-            if heuristic.content_markers:
-                for path, snippet in text_snippets.items():
-                    file = by_path.get(path)
-                    if file is None or not self._is_stack_text_candidate(file):
-                        continue
-                    if any(marker in snippet for marker in heuristic.content_markers):
-                        score += 2
-                        evidence.append(f"content:{path}")
-
-            if score <= 0:
+            detection = self._score_heuristic(
+                heuristic,
+                files=files,
+                text_snippets=text_snippets,
+                dependency_sources=dependency_sources,
+                by_name=by_name,
+                by_path=by_path,
+            )
+            if detection is None:
                 continue
 
-            unique_evidence = list(dict.fromkeys(evidence))
             scored.append(
                 (
-                    -score,
+                    -detection.score,
                     self._stack_priority(heuristic.category),
                     RepoMapStack(
                         slug=heuristic.slug,
                         name=heuristic.name,
                         category=heuristic.category,
-                        confidence=self._score_confidence(score),
-                        evidence=unique_evidence[:4],
+                        confidence=self._score_confidence(detection.score),
+                        evidence=detection.evidence,
                     ),
                 )
             )
@@ -361,35 +444,116 @@ class FrameworkDetector:
         detections.sort(key=lambda item: (item[0], item[1]))
         return [item[2] for item in detections[: self.max_package_managers]]
 
+    def detect_unsupported_technologies(
+        self,
+        files: list[ScannedFile],
+        text_snippets: dict[str, str],
+        *,
+        package_managers: list[RepoMapPackageManager] | None = None,
+        detected_stacks: list[RepoMapStack] | None = None,
+    ) -> list[RepoMapTechnology]:
+        dependency_sources = self._collect_dependency_sources(files)
+        by_name: dict[str, list[ScannedFile]] = {}
+        by_path = {file.relative_path: file for file in files}
+        for file in files:
+            by_name.setdefault(file.lower_name, []).append(file)
+
+        supported_slugs = {stack.slug for stack in detected_stacks or []}
+        manager_slugs = {manager.slug for manager in package_managers or []}
+        detections: list[tuple[int, str, RepoMapTechnology]] = []
+
+        for heuristic in UNSUPPORTED_TECH_HEURISTICS:
+            if heuristic.slug in supported_slugs:
+                continue
+
+            detection = self._score_heuristic(
+                heuristic,
+                files=files,
+                text_snippets=text_snippets,
+                dependency_sources=dependency_sources,
+                by_name=by_name,
+                by_path=by_path,
+            )
+            score = detection.score if detection is not None else 0
+            evidence = list(detection.evidence) if detection is not None else []
+            if heuristic.slug == "go_modules" and "go" in manager_slugs:
+                score += 3
+                evidence.append("package-manager:go")
+            elif heuristic.slug in manager_slugs:
+                score += 3
+                evidence.append(f"package-manager:{heuristic.slug}")
+
+            if score <= 0:
+                continue
+
+            unique_evidence = list(dict.fromkeys(evidence))
+            detections.append(
+                (
+                    -score,
+                    heuristic.slug,
+                    RepoMapTechnology(
+                        slug=heuristic.slug,
+                        name=heuristic.name,
+                        support="unsupported",
+                        reason=heuristic.reason,
+                        evidence=unique_evidence[:4],
+                    ),
+                )
+            )
+
+        detections.sort(key=lambda item: (item[0], item[1]))
+        return [item[2] for item in detections[: self.max_unsupported_technologies]]
+
     def _collect_dependency_sources(self, files: list[ScannedFile]) -> dict[str, set[str]]:
         sources: dict[str, set[str]] = {}
         for file in files:
+            if not self._is_dependency_manifest(file):
+                continue
             for package_name in self._extract_dependencies(file):
                 sources.setdefault(package_name, set()).add(file.relative_path)
         return sources
 
     def _extract_dependencies(self, file: ScannedFile) -> set[str]:
-        try:
-            text = file.absolute_path.read_text(encoding="utf-8", errors="ignore")
-        except OSError:
-            return set()
-
         match file.lower_name:
             case "package.json":
+                text = self._read_text(file)
+                if text is None:
+                    return set()
                 return self._parse_package_json_dependencies(text)
             case "pyproject.toml":
+                text = self._read_text(file)
+                if text is None:
+                    return set()
                 return self._parse_pyproject_dependencies(text)
             case lower_name if lower_name.startswith("requirements") and lower_name.endswith(".txt"):
+                text = self._read_text(file)
+                if text is None:
+                    return set()
                 return self._parse_requirement_lines(text.splitlines())
             case "pipfile":
+                text = self._read_text(file)
+                if text is None:
+                    return set()
                 return self._parse_pipfile_dependencies(text)
             case "cargo.toml":
+                text = self._read_text(file)
+                if text is None:
+                    return set()
                 return self._parse_cargo_dependencies(text)
             case "composer.json":
+                text = self._read_text(file)
+                if text is None:
+                    return set()
                 return self._parse_composer_dependencies(text)
             case "go.mod":
+                text = self._read_text(file)
+                if text is None:
+                    return set()
                 return self._parse_go_dependencies(text)
             case "gemfile":
+                text = self._read_text(file)
+                if text is None:
+                    return set()
                 return self._parse_gemfile_dependencies(text)
             case _:
                 return set()
@@ -489,8 +653,22 @@ class FrameworkDetector:
 
     def _parse_go_dependencies(self, text: str) -> set[str]:
         package_names: set[str] = set()
+        in_require_block = False
         for line in text.splitlines():
             line = line.strip()
+            if not line or line.startswith("//"):
+                continue
+            if line == "require (":
+                in_require_block = True
+                continue
+            if in_require_block:
+                if line == ")":
+                    in_require_block = False
+                    continue
+                fields = line.split()
+                if fields:
+                    package_names.add(fields[0].lower())
+                continue
             if line.startswith("require "):
                 fields = line.split()
                 if len(fields) >= 2:
@@ -534,6 +712,67 @@ class FrameworkDetector:
             return tomllib.loads(text)
         except tomllib.TOMLDecodeError:
             return {}
+
+    def _score_heuristic(
+        self,
+        heuristic: _FrameworkHeuristic | _UnsupportedTechHeuristic,
+        *,
+        files: list[ScannedFile],
+        text_snippets: dict[str, str],
+        dependency_sources: dict[str, set[str]],
+        by_name: dict[str, list[ScannedFile]],
+        by_path: dict[str, ScannedFile],
+    ) -> _DetectionScore | None:
+        score = 0
+        evidence: list[str] = []
+
+        for manifest_name in heuristic.manifest_names:
+            for file in by_name.get(manifest_name, []):
+                score += self._depth_weight(file.depth, base=3)
+                evidence.append(f"manifest:{file.relative_path}")
+
+        for package_name in heuristic.package_names:
+            for source_path in sorted(dependency_sources.get(package_name, ())):
+                score += 4
+                evidence.append(f"dependency:{package_name} in {source_path}")
+
+        for file_name in heuristic.file_names:
+            for file in by_name.get(file_name, []):
+                score += self._depth_weight(file.depth, base=3)
+                evidence.append(f"file:{file.relative_path}")
+
+        for prefix in heuristic.file_prefixes:
+            for file in files:
+                if file.lower_name.startswith(prefix):
+                    score += self._depth_weight(file.depth, base=3)
+                    evidence.append(f"file:{file.relative_path}")
+
+        if heuristic.content_markers:
+            for path, snippet in text_snippets.items():
+                file = by_path.get(path)
+                if file is None or not self._is_stack_text_candidate(file):
+                    continue
+                if any(marker in snippet for marker in heuristic.content_markers):
+                    score += 2
+                    evidence.append(f"content:{path}")
+
+        if score <= 0:
+            return None
+
+        return _DetectionScore(score=score, evidence=list(dict.fromkeys(evidence))[:4])
+
+    def _is_dependency_manifest(self, file: ScannedFile) -> bool:
+        lower_name = file.lower_name
+        return (
+            lower_name in {"package.json", "pyproject.toml", "pipfile", "cargo.toml", "composer.json", "go.mod", "gemfile"}
+            or (lower_name.startswith("requirements") and lower_name.endswith(".txt"))
+        )
+
+    def _read_text(self, file: ScannedFile) -> str | None:
+        try:
+            return file.absolute_path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            return None
 
     def _has_nested_key(self, data: object, path: tuple[str, ...]) -> bool:
         current = data

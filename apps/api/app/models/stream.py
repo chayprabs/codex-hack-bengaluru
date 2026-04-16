@@ -5,7 +5,7 @@ from typing import TypeAlias
 
 from pydantic import Field
 
-from .audit import AgentStatus, Audit, AuditState, CoverageBand, Finding
+from .audit import AgentStatus, Audit, AuditState, CoverageBand, Finding, ReplayRecord
 from .common import StrictModel
 
 
@@ -24,6 +24,8 @@ class ScoreUpdateEvent(StrictModel):
     supported_areas: list[str] = Field(default_factory=list)
     partially_supported_areas: list[str] = Field(default_factory=list)
     unsupported_areas: list[str] = Field(default_factory=list)
+    needs_manual_review_areas: list[str] = Field(default_factory=list)
+    unsupported_technologies: list[str] = Field(default_factory=list)
     scanned_files_count: int = 0
     skipped_files_count: int = 0
     frameworks_detected: list[str] = Field(default_factory=list)
@@ -58,6 +60,8 @@ class ScoreUpdateEvent(StrictModel):
             supported_areas=audit.supported_areas,
             partially_supported_areas=audit.partially_supported_areas,
             unsupported_areas=audit.unsupported_areas,
+            needs_manual_review_areas=audit.needs_manual_review_areas,
+            unsupported_technologies=audit.unsupported_technologies,
             scanned_files_count=audit.scanned_files_count,
             skipped_files_count=audit.skipped_files_count,
             frameworks_detected=audit.frameworks_detected,
@@ -103,11 +107,14 @@ class AuditCompleteEvent(StrictModel):
     supported_areas: list[str] = Field(default_factory=list)
     partially_supported_areas: list[str] = Field(default_factory=list)
     unsupported_areas: list[str] = Field(default_factory=list)
+    needs_manual_review_areas: list[str] = Field(default_factory=list)
+    unsupported_technologies: list[str] = Field(default_factory=list)
     scanned_files_count: int = 0
     skipped_files_count: int = 0
     frameworks_detected: list[str] = Field(default_factory=list)
     checks_run: list[str] = Field(default_factory=list)
     checks_skipped: list[str] = Field(default_factory=list)
+    replay_records: list[ReplayRecord] = Field(default_factory=list)
     updated_at: datetime
     finding_count: int
     message: str | None = None
@@ -132,11 +139,14 @@ class AuditCompleteEvent(StrictModel):
             supported_areas=audit.supported_areas,
             partially_supported_areas=audit.partially_supported_areas,
             unsupported_areas=audit.unsupported_areas,
+            needs_manual_review_areas=audit.needs_manual_review_areas,
+            unsupported_technologies=audit.unsupported_technologies,
             scanned_files_count=audit.scanned_files_count,
             skipped_files_count=audit.skipped_files_count,
             frameworks_detected=audit.frameworks_detected,
             checks_run=audit.checks_run,
             checks_skipped=audit.checks_skipped,
+            replay_records=audit.replay_records,
             updated_at=audit.updated_at,
             finding_count=len(audit.findings),
             message=message,

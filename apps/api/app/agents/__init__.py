@@ -3,6 +3,12 @@
 from .api_contract import ApiContractAgent, ApiContractAgentError, ApiContractFinding, ApiContractReport
 from .auth import AuthAgent, AuthAgentError, AuthFinding, AuthReport
 from .authz import AuthzAgent, AuthzAgentError, AuthzFinding, AuthzReport
+from .ai_guardrails import (
+    AiGuardrailsAgent,
+    AiGuardrailsAgentError,
+    AiGuardrailsFinding,
+    AiGuardrailsReport,
+)
 from .base import BaseAgent
 from .build_type_lint import BuildTypeLintAgent
 from .buildbreak import BuildbreakAgent, BuildbreakAgentError, BuildbreakFinding, BuildbreakReport
@@ -49,6 +55,7 @@ from .repo_mapper import (
     RepoMapKeyFiles,
     RepoMapScan,
     RepoMapStack,
+    RepoMapTechnology,
     RepoMapper,
     RepoMapperAgent,
     RepoMapperError,
@@ -63,7 +70,9 @@ from .types import (
     FindingEvidence,
     FindingEvidenceKind,
     FindingConfidence,
+    FindingProofType,
     FindingSeverity,
+    FindingVerificationState,
     PatchSuggestion,
     PatchSuggestionChange,
     PatchSuggestionStrategy,
@@ -80,6 +89,7 @@ def _register_default_agents() -> None:
         AuthzAgent(),
         WebhookAgent(),
         DependencyAgent(),
+        AiGuardrailsAgent(),
         ConfigHeadersCorsAgent(),
         InputValidationAgent(),
         FrontendRuntimeAgent(),
@@ -106,6 +116,10 @@ __all__ = [
     "AgentRegistryError",
     "AgentResult",
     "AgentResultStatus",
+    "AiGuardrailsAgent",
+    "AiGuardrailsAgentError",
+    "AiGuardrailsFinding",
+    "AiGuardrailsReport",
     "AuthAgent",
     "AuthAgentError",
     "AuthFinding",
@@ -131,7 +145,9 @@ __all__ = [
     "FindingEvidence",
     "FindingEvidenceKind",
     "FindingConfidence",
+    "FindingProofType",
     "FindingSeverity",
+    "FindingVerificationState",
     "FrontendRuntimeAgent",
     "FrontendRuntimeAgentError",
     "FrontendRuntimeFinding",
@@ -153,6 +169,7 @@ __all__ = [
     "RepoMapKeyFiles",
     "RepoMapScan",
     "RepoMapStack",
+    "RepoMapTechnology",
     "RepoMapper",
     "RepoMapperAgent",
     "RepoMapperError",

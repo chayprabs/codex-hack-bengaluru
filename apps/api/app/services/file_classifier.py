@@ -660,14 +660,27 @@ class FileClassifier:
         return self._dedupe_matches(matches, limit=self.max_matches_per_category)
 
     def _ai_rule_reason(self, file: ScannedFile) -> str | None:
+        ai_tool_tokens = {"agent", "agents", "copilot", "claude", "cursor", "codex", "ai"}
+        ai_rule_name_tokens = ("agent", "copilot", "claude", "cursor", "codex", "instruction", "prompt", "rule")
+        has_ai_tool_context = any(token in part for part in file.parts_lower for token in ai_tool_tokens)
         if file.lower_name in {".cursorrules", "claude.md", "agents.md", ".windsurfrules"}:
             return f"AI instructions file `{file.name}`"
         if file.lower_path.startswith(".cursor/rules/"):
             return "Cursor rule file"
+        if file.lower_path.startswith(".copilot/") or file.lower_path.startswith(".github/copilot/"):
+            return "Copilot configuration or prompt file"
         if file.lower_path in {".github/copilot-instructions.md", ".github/instructions/copilot-instructions.md"}:
             return "GitHub Copilot instructions file"
         if file.lower_path.startswith(".github/instructions/"):
             return "GitHub instructions file"
+        if any(part in {"prompt", "prompts", "instruction", "instructions"} for part in file.parts_lower[:-1]):
+            if file.suffix in {".md", ".mdc", ".txt", ".yaml", ".yml", ".json", ".toml"} and any(
+                token in file.lower_name for token in ai_rule_name_tokens
+            ) and has_ai_tool_context:
+                return f"AI prompt or instruction file `{file.name}`"
+        if any(part in {"agent", "agents"} for part in file.parts_lower[:-1]) and file.suffix in {".md", ".txt", ".yaml", ".yml", ".json", ".toml"}:
+            if any(token in file.lower_name for token in ("prompt", "instruction", "rule", "copilot", "claude", "cursor", "codex")):
+                return f"Agent instruction file `{file.name}`"
         if "copilot" in file.lower_name and file.suffix == ".md":
             return f"AI tooling instructions file `{file.name}`"
         return None

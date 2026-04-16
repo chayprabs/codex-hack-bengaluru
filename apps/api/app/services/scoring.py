@@ -477,8 +477,8 @@ class ScoringService:
             key = (
                 str(self._read(finding, "id", default="") or ""),
                 str(self._read(finding, "title", default="") or ""),
-                str(self._read(finding, "file_path", default="") or ""),
-                str(self._read(finding, "line", default=self._read(finding, "line_start", default="")) or ""),
+                "|".join(self._finding_files(finding)),
+                "|".join(self._finding_line_hints(finding)),
             )
             if key in seen_finding_keys:
                 continue
@@ -488,9 +488,7 @@ class ScoringService:
         findings_with_location = 0
         findings_without_location = 0
         for finding in deduped_findings:
-            file_path = str(self._read(finding, "file_path", default="") or "").strip()
-            line = self._read(finding, "line", default=self._read(finding, "line_start", default=None))
-            if file_path or line is not None:
+            if self._finding_files(finding) or self._finding_line_hints(finding):
                 findings_with_location += 1
             else:
                 findings_without_location += 1
@@ -614,14 +612,18 @@ class ScoringService:
         confidence = self._normalize_confidence(
             self._read(item, "confidence", default=None),
             metadata=self._read(item, "metadata", default=None),
+            proof_type=self._read(item, "proof_type", default=None),
+        )
+        impact_summary = str(
+            self._read(item, "impact_summary", default=self._read(item, "summary", default="")) or ""
         )
         identity = (
             str(self._read(item, "id", default="") or ""),
-            str(self._read(item, "rule_id", default="") or ""),
+            str(self._read(item, "check_name", default=self._read(item, "rule_id", default="")) or ""),
             str(self._read(item, "title", default="") or ""),
-            str(self._read(item, "file_path", default="") or ""),
-            str(self._read(item, "line_start", default=self._read(item, "line", default="")) or ""),
-            str(self._read(item, "summary", default="") or ""),
+            "|".join(self._finding_files(item)),
+            "|".join(self._finding_line_hints(item)),
+            impact_summary,
         )
         return _NormalizedFinding(identity=identity, severity=severity, confidence=confidence)
 
@@ -812,6 +814,57 @@ class ScoringService:
             return item.get(key, default)
         return getattr(item, key, default)
 
+    def _normalize_string_list(self, value: object) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            cleaned = value.strip()
+            return [cleaned] if cleaned else []
+        if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+            normalized: list[str] = []
+            for item in value:
+                cleaned = str(item).strip()
+                if cleaned:
+                    normalized.append(cleaned)
+            return normalized
+        cleaned = str(value).strip()
+        return [cleaned] if cleaned else []
+
+    def _format_line_hint(self, start: object, end: object = None) -> str | None:
+        try:
+            normalized_start = int(start)
+        except (TypeError, ValueError):
+            return None
+        if normalized_start < 1:
+            return None
+        try:
+            normalized_end = int(end) if end is not None else None
+        except (TypeError, ValueError):
+            normalized_end = None
+        if normalized_end is not None and normalized_end >= normalized_start:
+            return (
+                str(normalized_start)
+                if normalized_start == normalized_end
+                else f"{normalized_start}-{normalized_end}"
+            )
+        return str(normalized_start)
+
+    def _finding_files(self, item: object) -> list[str]:
+        files = self._normalize_string_list(self._read(item, "files", default=None))
+        if files:
+            return files
+        return self._normalize_string_list(self._read(item, "file_path", default=None))
+
+    def _finding_line_hints(self, item: object) -> list[str]:
+        line_hints = self._normalize_string_list(self._read(item, "line_hints", default=None))
+        if line_hints:
+            return line_hints
+        hint = self._format_line_hint(
+            self._read(item, "line_start", default=self._read(item, "line", default=None)),
+            self._read(item, "line_end", default=None),
+        )
+        return [hint] if hint is not None else []
+
     def _normalize_severity(self, value: object) -> FindingSeverity | None:
         normalized = str(value).strip().lower()
         if normalized in SEVERITY_PENALTIES:
@@ -823,6 +876,7 @@ class ScoringService:
         value: object,
         *,
         metadata: object,
+        proof_type: object,
     ) -> FindingConfidence:
         normalized = str(value).strip().lower()
         if normalized in CONFIDENCE_MULTIPLIERS:
@@ -831,6 +885,11 @@ class ScoringService:
             metadata_confidence = str(metadata.get("confidence", "")).strip().lower()
             if metadata_confidence in CONFIDENCE_MULTIPLIERS:
                 return metadata_confidence  # type: ignore[return-value]
+        normalized_proof_type = str(proof_type).strip().lower()
+        if normalized_proof_type == "manual_review_recommendation":
+            return "low"
+        if normalized_proof_type in {"runtime_check", "exploit_succeeded"}:
+            return "high"
         return "high"
 
 

@@ -6,6 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from ..models.audit import AuditMode
 from .base import BaseAgent
 from .repo_mapper import RepoMap, RepoMapFile
 from .types import AgentContext, AgentResult
@@ -19,6 +20,7 @@ PlannerAgentName = Literal[
     "authz",
     "webhook",
     "dependency",
+    "ai_guardrails",
     "config_headers_cors",
     "input_validation",
     "frontend_runtime",
@@ -133,7 +135,8 @@ class RepoWorkPlan(BaseModel):
 class RepoPlanner:
     """Deterministic router that narrows repo slices for specialist agents."""
 
-    def __init__(self, *, max_targets_per_agent: int = 8) -> None:
+    def __init__(self, *, mode: AuditMode = "deep", max_targets_per_agent: int = 8) -> None:
+        self.mode = mode
         self.max_targets_per_agent = max_targets_per_agent
 
     def plan(self, repo_map: RepoMap | dict[str, object]) -> RepoWorkPlan:
@@ -143,14 +146,23 @@ class RepoPlanner:
         assignments = [
             self._build_secrets_plan(normalized, indexed),
             self._build_auth_plan(normalized, indexed),
-            self._build_authz_plan(normalized, indexed),
             self._build_webhook_plan(normalized, indexed),
             self._build_dependency_plan(normalized, indexed),
+            self._build_ai_guardrails_plan(normalized, indexed),
             self._build_config_headers_cors_plan(normalized, indexed),
             self._build_input_validation_plan(normalized, indexed),
-            self._build_frontend_runtime_plan(normalized, indexed),
-            self._build_build_type_lint_plan(normalized, indexed),
         ]
+        if self.mode == "deep":
+            assignments.extend(
+                [
+                    self._build_authz_plan(normalized, indexed),
+                    self._build_frontend_runtime_plan(normalized, indexed),
+                    self._build_build_type_lint_plan(normalized, indexed),
+                    self._build_buildbreak_plan(normalized, indexed),
+                    self._build_typelint_plan(normalized, indexed),
+                    self._build_api_contract_plan(normalized, indexed),
+                ]
+            )
 
         return RepoWorkPlan(
             repo_name=normalized.repo_name,
@@ -178,6 +190,7 @@ class RepoPlanner:
         files.extend(self._wrap("config", repo_map.key_files.config))
         files.extend(self._wrap("manifests", repo_map.key_files.manifests))
         files.extend(self._wrap("lockfiles", repo_map.key_files.lockfiles))
+        files.extend(self._wrap("ai_rules", repo_map.key_files.ai_rules))
         return files
 
     def _wrap(self, category: str, files: list[RepoMapFile]) -> list[_IndexedFile]:
@@ -327,6 +340,24 @@ class RepoPlanner:
             targets,
             fallback="No manifests or lockfiles were mapped.",
             planned="Review only mapped dependency manifests, lockfiles, and package roots.",
+        )
+
+    def _build_ai_guardrails_plan(
+        self,
+        repo_map: RepoMap,
+        indexed: list[_IndexedFile],
+    ) -> PlannerAssignment:
+        ai_rule_files = self._pick_files(
+            indexed,
+            categories=("ai_rules",),
+        )
+        root_targets = self._root_targets(ai_rule_files, reason="slice with AI rule or prompt configuration files")
+        targets = self._combine_targets(root_targets, self._file_targets(ai_rule_files))
+        return self._assignment(
+            "ai_guardrails",
+            targets,
+            fallback="No AI tooling rule or prompt files were mapped.",
+            planned="Inspect mapped AI coding rules, prompt files, and copilot-style instructions for governance risks only.",
         )
 
     def _build_config_headers_cors_plan(
@@ -636,11 +667,12 @@ class PlannerAgent(BaseAgent):
     description = "Routes mapped repo slices to the most relevant specialist agents."
 
     def __init__(self, planner: RepoPlanner | None = None) -> None:
-        self.planner = planner or RepoPlanner()
+        self.planner = planner
+        self._mode_planners: dict[AuditMode, RepoPlanner] = {}
 
     async def run(self, context: AgentContext) -> AgentResult:
         try:
-            work_plan = self.planner.plan_context(context)
+            work_plan = self._planner_for_context(context).plan_context(context)
         except PlannerError as exc:
             return self.result(status="failed", summary=str(exc))
 
@@ -648,3 +680,23 @@ class PlannerAgent(BaseAgent):
             summary=work_plan.summary,
             metadata={"work_plan": work_plan.model_dump(mode="json")},
         )
+
+    def _planner_for_context(self, context: AgentContext) -> RepoPlanner:
+        if self.planner is not None:
+            return self.planner
+
+        audit_mode = self._audit_mode_from_context(context)
+        cached = self._mode_planners.get(audit_mode)
+        if cached is not None:
+            return cached
+
+        planner = RepoPlanner(
+            mode=audit_mode,
+            max_targets_per_agent=12 if audit_mode == "deep" else 5,
+        )
+        self._mode_planners[audit_mode] = planner
+        return planner
+
+    def _audit_mode_from_context(self, context: AgentContext) -> AuditMode:
+        raw_mode = context.metadata.get("audit_mode")
+        return raw_mode if raw_mode in {"fast", "deep"} else "fast"

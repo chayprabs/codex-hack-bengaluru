@@ -18,16 +18,26 @@ from ..models import (
     Audit,
     AuditCompleteEvent,
     CreateAuditRequest,
+    DemoSetupResponse,
     FindingEvent,
     ScoreUpdateEvent,
     WallEntry,
 )
-from .demo_data import build_demo_lifecycle_steps, build_seed_demo_audits
+from .demo_data import (
+    build_demo_lifecycle_steps,
+    build_demo_setup,
+    build_seed_demo_audits,
+    get_demo_profile_by_key,
+)
 from .audit_runner import AuditRunMode, AuditRunner
 
 
 class DemoAuditConfigurationError(RuntimeError):
     """Raised when the demo audit config cannot produce a valid request."""
+
+
+class DemoAuditProfileNotFoundError(RuntimeError):
+    """Raised when the requested seeded demo profile does not exist."""
 
 
 class AuditService:
@@ -48,6 +58,7 @@ class AuditService:
         audit = Audit(
             id=str(uuid4()),
             repo_url=payload.repo_url,
+            audit_mode=payload.audit_mode,
             status="queued",
             agents=self.runner.build_initial_agents(),
         )
@@ -65,7 +76,7 @@ class AuditService:
                 delta=0,
                 previous_coverage=stored_audit.coverage,
                 coverage_delta=0,
-                reason="Audit queued and waiting for the lifecycle runner to start.",
+                reason="Audit queued; score and coverage have not moved yet.",
             ),
         )
         self.runner.start(stored_audit.id, mode=mode)
@@ -80,14 +91,26 @@ class AuditService:
             return None
         return self._build_stream_snapshot(audit)
 
-    def create_demo_audit(self) -> Audit:
+    def create_demo_audit(self, profile_key: str | None = None) -> Audit:
+        profile = get_demo_profile_by_key(
+            profile_key,
+            primary_demo_repo_url=self.demo_repo_url,
+        )
+        if profile is None:
+            raise DemoAuditProfileNotFoundError(
+                f"Demo profile '{profile_key}' was not found."
+            )
+
         try:
-            demo_request = CreateAuditRequest(repo_url=self.demo_repo_url)
+            demo_request = CreateAuditRequest(repo_url=profile.repo_url, audit_mode="deep")
         except ValidationError as exc:
             raise DemoAuditConfigurationError(
                 "The configured demo repo URL is invalid. Update DEMO_REPO_URL and try again."
             ) from exc
         return self._create_audit(demo_request, mode="demo")
+
+    def get_demo_setup(self) -> DemoSetupResponse:
+        return build_demo_setup(self.demo_repo_url)
 
     def list_wall(self) -> list[WallEntry]:
         return self.repository.list_wall_entries()
@@ -132,7 +155,7 @@ class AuditService:
                     delta=0,
                     previous_coverage=audit.coverage,
                     coverage_delta=0,
-                    reason="Current audit score snapshot.",
+                    reason=self._snapshot_score_reason(audit),
                 ),
                 event_id=f"{audit.id}:snapshot:score",
             )
@@ -148,6 +171,27 @@ class AuditService:
             )
 
         return snapshot
+
+    @staticmethod
+    def _snapshot_score_reason(audit: Audit) -> str:
+        if audit.findings:
+            lead_finding = max(
+                audit.findings,
+                key=lambda finding: {"critical": 4, "high": 3, "medium": 2, "low": 1}.get(finding.severity, 0),
+            )
+            summary = (lead_finding.impact_summary or lead_finding.technical_summary or lead_finding.title).strip().rstrip(".!? ")
+            if summary:
+                first_word, _, remainder = summary.partition(" ")
+                summary = f"{first_word.lower()} {remainder}".strip() if remainder and not (first_word.isupper() and len(first_word) > 1) else summary
+                return f"Score reflects {summary}."
+
+        if audit.confidence_limited or audit.unsupported_areas or audit.needs_manual_review_areas or audit.unsupported_technologies:
+            return "Coverage reduced confidence because part of the repo stayed unsupported or manual-review only."
+
+        if audit.status == "completed":
+            return "Score held after verifier closeout found no persisted findings in the audited scope."
+
+        return "Coverage is still expanding while planner, scanner, and verifier settle."
 
 
 audit_service = AuditService(

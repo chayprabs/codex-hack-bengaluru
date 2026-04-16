@@ -6,7 +6,19 @@ import { formatDateTime, formatRelativeTime } from "@/lib/format";
 import { cn, formatSeverityLabel } from "@/lib/utils";
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorState } from "@/components/ErrorState";
-import { StatusBadge, toneFromSeverity } from "@/components/StatusBadge";
+import {
+  describeFindingConfidence,
+  describeFindingProofType,
+  describeFindingVerificationState,
+  formatFindingConfidenceBadgeLabel,
+  formatFindingProofBadgeLabel,
+  formatFindingVerificationBadgeLabel,
+  StatusBadge,
+  toneFromFindingConfidence,
+  toneFromFindingProofType,
+  toneFromFindingVerificationState,
+  toneFromSeverity,
+} from "@/components/StatusBadge";
 import { StoryStageRail } from "@/components/StoryStageRail";
 
 type FindingFeedProps = {
@@ -41,15 +53,66 @@ function FindingFeedSkeleton() {
   );
 }
 
+function primaryLocationLabel(finding: Finding) {
+  const filePath = finding.files[0];
+  const lineHint = finding.line_hints[0];
+
+  if (!filePath) {
+    return "No file path";
+  }
+
+  return `${filePath}${lineHint ? `:${lineHint}` : ""}`;
+}
+
+function cleanText(value: string | null | undefined) {
+  const normalized = value?.trim();
+  return normalized ? normalized : null;
+}
+
+function sameText(left: string | null | undefined, right: string | null | undefined) {
+  return cleanText(left)?.toLowerCase() === cleanText(right)?.toLowerCase();
+}
+
+function buildObservedEvidence(finding: Finding, story?: FindingStory) {
+  const candidates = [
+    cleanText(finding.evidence_snippet),
+    cleanText(finding.technical_summary),
+    cleanText(finding.summary),
+    cleanText(story?.currentLabel),
+  ].filter((value): value is string => Boolean(value));
+
+  const impactSummary = cleanText(finding.impact_summary);
+  return (
+    candidates.find((candidate) => !sameText(candidate, impactSummary)) ??
+    "Evidence was published, but no short note was attached yet."
+  );
+}
+
+function buildTechnicalDetail(finding: Finding) {
+  const impactSummary = cleanText(finding.impact_summary);
+  const evidenceSnippet = cleanText(finding.evidence_snippet);
+  const candidates = [cleanText(finding.technical_summary), cleanText(finding.summary)].filter(
+    (value): value is string => Boolean(value),
+  );
+
+  return (
+    candidates.find((candidate) => !sameText(candidate, impactSummary) && !sameText(candidate, evidenceSnippet)) ?? null
+  );
+}
+
+function buildAssessmentSummary(finding: Finding) {
+  return `${describeFindingConfidence(finding.confidence)} ${describeFindingProofType(finding.proof_type)} ${describeFindingVerificationState(finding.verification_state)}`;
+}
+
 export function FindingFeed({
   findings = [],
   stories = {},
   isLoading = false,
   errorMessage,
-  title = "Finding feed",
-  description = "Current findings returned by the audit API.",
-  emptyTitle = "No findings yet",
-  emptyDescription = "Once the scan reports issues, they will appear here.",
+  title = "Findings",
+  description = "What the audit found, what backs it, and whether it was reviewed.",
+  emptyTitle = "No findings published yet",
+  emptyDescription = "Findings appear here as evidence is published.",
   action,
   className,
 }: Readonly<FindingFeedProps>) {
@@ -80,7 +143,7 @@ export function FindingFeed({
           <ErrorState
             compact
             title="Findings unavailable"
-            description="The findings feed could not be rendered from the latest response."
+            description="Could not render the latest findings view."
             message={errorMessage}
           />
         ) : null}
@@ -93,7 +156,16 @@ export function FindingFeed({
           <ol className="space-y-4" aria-label="Audit findings">
             {sortedFindings.map((finding, index) => {
               const story = stories[finding.id];
-              const locationLabel = finding.file_path ? `${finding.file_path}${finding.line ? `:${finding.line}` : ""}` : "No file path";
+              const locationLabel = primaryLocationLabel(finding);
+              const attributionLabel = [finding.agent_name, finding.check_name].filter(Boolean).join(" / ");
+              const patchLabel = finding.suggested_patch ?? story?.suggestedPatch ?? "Fix guidance is still being drafted.";
+              const evidenceSnippet = buildObservedEvidence(finding, story);
+              const technicalSummary = buildTechnicalDetail(finding);
+              const showTechnicalSummary = Boolean(technicalSummary);
+              const confidenceLabel = formatFindingConfidenceBadgeLabel(finding.confidence);
+              const proofLabel = formatFindingProofBadgeLabel(finding.proof_type);
+              const verificationLabel = formatFindingVerificationBadgeLabel(finding.verification_state);
+              const assessmentSummary = buildAssessmentSummary(finding);
 
               return (
                 <li key={finding.id}>
@@ -113,6 +185,15 @@ export function FindingFeed({
                             #{index + 1}
                           </span>
                           <StatusBadge tone={toneFromSeverity(finding.severity)}>{formatSeverityLabel(finding.severity)}</StatusBadge>
+                          <StatusBadge size="sm" tone={toneFromFindingConfidence(finding.confidence)}>
+                            {confidenceLabel}
+                          </StatusBadge>
+                          <StatusBadge size="sm" tone={toneFromFindingVerificationState(finding.verification_state)}>
+                            {verificationLabel}
+                          </StatusBadge>
+                          <StatusBadge size="sm" tone={toneFromFindingProofType(finding.proof_type)}>
+                            {proofLabel}
+                          </StatusBadge>
                           {story?.isHighImpact ? (
                             <StatusBadge tone="danger" mono>
                               major
@@ -121,39 +202,50 @@ export function FindingFeed({
                           {story?.isRecent ? (
                             <span className="inline-flex items-center gap-2 rounded-full border border-cyan-200 bg-cyan-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-cyan-700">
                               <span className="story-pulse inline-flex h-2.5 w-2.5 rounded-full bg-cyan-500" />
-                              live now
+                              live
                             </span>
                           ) : null}
                         </div>
 
                         <div className="mt-4">
                           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                            {story?.headline ?? "Finding in review"}
+                            {story?.headline ?? attributionLabel ?? "Latest update"}
                           </p>
                           <h3 className="mt-2 text-xl font-semibold tracking-[-0.03em] text-slate-950">{finding.title}</h3>
                           <p className="mt-3 text-sm leading-6 text-slate-700">
-                            {finding.summary || "The backend returned a finding without a summary."}
+                            {finding.impact_summary || "Impact summary is still loading."}
                           </p>
+                          {showTechnicalSummary ? (
+                            <div className="mt-4 rounded-[1.25rem] border border-slate-200 bg-white/85 px-4 py-4">
+                              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Technical note</p>
+                              <p className="mt-2 text-sm leading-6 text-slate-700">{technicalSummary}</p>
+                            </div>
+                          ) : null}
                         </div>
 
-                        <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                        <div className="mt-5 grid gap-3 sm:grid-cols-3">
                           <div className="rounded-[1.25rem] border border-slate-200 bg-white/85 px-4 py-4">
-                            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Current step</p>
+                            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Current status</p>
                             <p className="mt-3 text-sm font-semibold tracking-[-0.02em] text-slate-950">
-                              {story?.currentLabel ?? "Awaiting story state"}
+                              {story?.currentLabel ?? "Story state pending"}
                             </p>
                             <p className="mt-2 text-sm leading-6 text-slate-600">
-                              {story?.statusLabel ?? "The finding is still being positioned in the audit flow."}
+                              {story?.statusLabel ?? "This finding is still moving through the audit."}
                             </p>
                           </div>
                           <div className="rounded-[1.25rem] border border-slate-200 bg-white/85 px-4 py-4">
-                            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Patch proposal</p>
+                            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Suggested fix</p>
                             <p className="mt-3 text-sm font-semibold tracking-[-0.02em] text-slate-950">
-                              {story?.impactLabel ?? "Remediation handoff"}
+                              {story?.impactLabel ?? attributionLabel ?? "Remediation handoff"}
                             </p>
-                            <p className="mt-2 text-sm leading-6 text-slate-600">
-                              {story?.suggestedPatch ?? "A remediation suggestion will appear once the story model is available."}
+                            <p className="mt-2 text-sm leading-6 text-slate-600">{patchLabel}</p>
+                          </div>
+                          <div className="rounded-[1.25rem] border border-slate-200 bg-white/85 px-4 py-4">
+                            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Why we believe it</p>
+                            <p className="mt-3 text-sm font-semibold tracking-[-0.02em] text-slate-950">
+                              {attributionLabel || "Signal / proof / verification"}
                             </p>
+                            <p className="mt-2 text-sm leading-6 text-slate-600">{assessmentSummary}</p>
                           </div>
                         </div>
                       </div>
@@ -162,7 +254,7 @@ export function FindingFeed({
                         <div className="rounded-[1.25rem] border border-slate-200 bg-white/88 p-4">
                           <div className="flex items-start justify-between gap-4">
                             <div>
-                              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Evidence</p>
+                              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Code location</p>
                               <p className="mt-3 font-mono text-sm font-semibold text-slate-950">
                                 {story?.evidenceLabel ?? locationLabel}
                               </p>
@@ -174,25 +266,30 @@ export function FindingFeed({
 
                           <dl className="mt-4 grid gap-3 sm:grid-cols-2">
                             <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                              <dt className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Logged</dt>
+                              <dt className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Published</dt>
                               <dd className="mt-2 font-mono text-sm font-semibold text-slate-950">{formatDateTime(finding.created_at)}</dd>
                             </div>
                             <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                              <dt className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Impact lane</dt>
+                              <dt className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Anchors</dt>
                               <dd className="mt-2 font-mono text-sm font-semibold text-slate-950">
-                                {story?.impactLabel ?? "Finding lane"}
+                                {finding.files.length ? `${finding.files.length} attached` : "None"}
                               </dd>
                             </div>
                           </dl>
+
+                          <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Evidence</p>
+                            <p className="mt-2 text-sm leading-6 text-slate-700">{evidenceSnippet}</p>
+                          </div>
                         </div>
 
                         {story ? (
                           <div className="rounded-[1.25rem] border border-slate-200 bg-white/88 p-4">
                             <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                               <div>
-                                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Attack-story flow</p>
+                                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Progress</p>
                                 <p className="mt-2 text-sm leading-6 text-slate-600">
-                                  Discovery starts red, response planning stabilizes, and verification closes the lane in green when it succeeds.
+                                  Red marks detection. Amber marks evidence and fix work. Green appears only after review.
                                 </p>
                               </div>
                               <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-slate-500">{story.statusLabel}</p>

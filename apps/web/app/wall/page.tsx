@@ -131,25 +131,25 @@ export default async function WallPage({ searchParams }: WallPageProps) {
       <PageShell
         actions={
           <Link href="/" className={pageActionClassName}>
-            Back to auditing
+            Back to audits
           </Link>
         }
       >
         <header className="rounded-[1.75rem] border border-slate-200 bg-white/90 p-5 shadow-sm sm:p-6">
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Shame wall</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Audit wall</p>
           <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em] text-slate-950 sm:text-5xl">
-            Ranked findings across active audits
+            The highest-risk findings, ranked
           </h1>
           <p className="mt-4 max-w-3xl text-base leading-7 text-slate-600 sm:text-lg">
-            A clean leaderboard of the repos you probably want to inspect before anyone says &ldquo;looks good to me.&rdquo;
+            See the issues that matter most across seeded demos and live scans.
           </p>
         </header>
 
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <MetricCard
-            label="Wall entries"
+            label="Findings"
             value={String(allEntries.length)}
-            detail="Findings currently surfaced by the backend wall feed."
+            detail="Issues currently visible on the wall."
           />
           <MetricCard
             label="Critical"
@@ -162,9 +162,9 @@ export default async function WallPage({ searchParams }: WallPageProps) {
             detail="Unique repositories represented on the wall right now."
           />
           <MetricCard
-            label="Weakest trust"
+            label="Lowest score"
             value={weakestTrustScore === null ? "N/A" : formatScore(weakestTrustScore)}
-            detail="Lowest severity-derived trust score in the current feed."
+            detail="Lowest severity-derived score in the current feed."
           />
         </section>
 
@@ -172,9 +172,9 @@ export default async function WallPage({ searchParams }: WallPageProps) {
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Filters</p>
-              <h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-slate-950">Focus the wall</h2>
+              <h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-slate-950">Filter by severity</h2>
               <p className="mt-2 text-sm leading-6 text-slate-600">
-                Filter by severity to keep the demo readable while still showing a ranked view.
+                Keep the list readable during a demo.
               </p>
             </div>
             <StatusBadge mono>{filteredEntries.length} visible</StatusBadge>
@@ -216,12 +216,12 @@ export default async function WallPage({ searchParams }: WallPageProps) {
 
         {allEntries.length === 0 ? (
           <EmptyState
-            title="The shame wall is empty"
-            description="No findings have landed yet. Kick off an audit and this page will start showing ranked entries."
+            title="No findings yet"
+            description="Start an audit and this page will begin filling with ranked findings."
             action={
               <div className="flex flex-wrap gap-3">
                 <Link href="/" className={pageActionClassName}>
-                  Start auditing
+                  Start audit
                 </Link>
               </div>
             }
@@ -229,14 +229,14 @@ export default async function WallPage({ searchParams }: WallPageProps) {
         ) : filteredEntries.length === 0 ? (
           <EmptyState
             title="No entries match this filter"
-            description="There are findings on the wall, but none for the currently selected severity tier."
+            description="There are findings on the wall, but none at this severity."
             action={
               <div className="flex flex-wrap gap-3">
                 <Link href="/wall" className={pageActionClassName}>
-                  Show all entries
+                  Show all
                 </Link>
                 <Link href="/" className={pageActionClassName}>
-                  Start auditing
+                  Start audit
                 </Link>
               </div>
             }
@@ -245,7 +245,7 @@ export default async function WallPage({ searchParams }: WallPageProps) {
           <WallTable
             entries={filteredEntries}
             title="Ranked findings"
-            description="Trust scores below are severity-derived until the backend exposes a first-class score per wall entry."
+            description="Scores below are estimated from severity until wall entries expose a first-class score."
             getAuditHref={(entry) => `/audit/${entry.audit_id}`}
             rankEntries
             getTrustScore={deriveTrustScore}
@@ -260,19 +260,19 @@ export default async function WallPage({ searchParams }: WallPageProps) {
         maxWidth="5xl"
         actions={
           <Link href="/" className={pageActionClassName}>
-            Back to auditing
+            Back to audits
           </Link>
         }
       >
         <ErrorState
-          title="Shame wall unavailable"
-          description="The frontend could not load the wall feed from the API."
+          title="Wall unavailable"
+          description="Could not load the wall feed."
           message={getApiErrorMessage(error)}
           code={getApiErrorStatus(error)}
           action={
             <div className="flex flex-wrap gap-3">
               <Link href="/" className={pageActionClassName}>
-                Back to auditing
+                Back to audits
               </Link>
             </div>
           }

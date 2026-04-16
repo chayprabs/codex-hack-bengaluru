@@ -4,6 +4,6 @@ dockerfilePath = "Dockerfile"
 watchPatterns = ["/apps/api/**"]
 
 [deploy]
-startCommand = "sh -c 'uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}'"
+startCommand = "python -m app.main"
 healthcheckPath = "/api/health"
 restartPolicyType = "ON_FAILURE"

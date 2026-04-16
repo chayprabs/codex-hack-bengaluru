@@ -64,7 +64,7 @@ Why this is the most reliable monorepo setup right now:
 Set these in Railway:
 
 ```env
-DEMO_REPO_URL=https://github.com/vercel/next.js
+DEMO_REPO_URL=https://github.com/trustlayer-demo/acme-subscriptions-platform
 CORS_ORIGINS=https://your-web.vercel.app
 ```
 

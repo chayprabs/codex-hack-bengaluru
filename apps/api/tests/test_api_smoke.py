@@ -99,12 +99,22 @@ class ApiSmokeTests(unittest.TestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         payload = response.json()
         self.assertEqual(payload["repo_url"], repo_url)
+        self.assertEqual(payload["audit_mode"], "fast")
         self.assertEqual(payload["status"], "queued")
         self.assertEqual(
             [agent["name"] for agent in payload["agents"]],
             ["planner", "scanner", "verifier"],
         )
         self.assertIn((payload["id"], "live"), self.runner.started_audits)
+
+    def test_create_audit_accepts_deep_mode(self) -> None:
+        response = self.client.post(
+            "/api/audits",
+            json={"repo_url": "https://github.com/acme/platform", "audit_mode": "deep"},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.json()["audit_mode"], "deep")
 
     def test_create_audit_normalizes_supported_github_repo_urls(self) -> None:
         response = self.client.post(
@@ -132,8 +142,35 @@ class ApiSmokeTests(unittest.TestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         payload = response.json()
         self.assertEqual(payload["repo_url"], "https://github.com/example/demo-repo")
+        self.assertEqual(payload["audit_mode"], "deep")
         self.assertEqual(payload["status"], "queued")
         self.assertIn((payload["id"], "demo"), self.runner.started_audits)
+
+    def test_create_demo_audit_accepts_profile_key(self) -> None:
+        response = self.client.post("/api/demo-audit?profile_key=tenant-portal")
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        payload = response.json()
+        self.assertEqual(payload["repo_url"], "https://github.com/trustlayer-demo/workspace-portal")
+        self.assertEqual(payload["audit_mode"], "deep")
+        self.assertIn((payload["id"], "demo"), self.runner.started_audits)
+
+    def test_demo_setup_exposes_flagship_path_and_backup_profiles(self) -> None:
+        response = self.client.get("/api/demo-setup")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        payload = response.json()
+        self.assertEqual(payload["primary_demo_repo_url"], "https://github.com/example/demo-repo")
+        self.assertIn("replay sync", payload["stream_backup_summary"].lower())
+        self.assertGreaterEqual(len(payload["profiles"]), 5)
+
+        flagship = next(profile for profile in payload["profiles"] if profile["is_flagship"])
+        self.assertEqual(flagship["repo_url"], "https://github.com/example/demo-repo")
+        self.assertEqual(flagship["label"], "Acme subscriptions platform")
+        self.assertEqual(flagship["score_journey"][0], 100)
+        self.assertEqual(flagship["final_score"], 57)
+        self.assertEqual(flagship["final_coverage"], 92)
+        self.assertGreaterEqual(flagship["finding_count"], 5)
 
     def test_get_audit_returns_created_audit(self) -> None:
         created_audit = self._create_audit()
@@ -184,9 +221,16 @@ class ApiSmokeTests(unittest.TestCase):
                 Finding(
                     severity="high",
                     title="Unsigned webhook path",
-                    summary="Webhook processing starts before trust is established.",
-                    file_path="app/routes/webhooks.py",
-                    line=24,
+                    agent_name="webhook",
+                    check_name="missing_signature_verification",
+                    files=["app/routes/webhooks.py"],
+                    line_hints=["24"],
+                    impact_summary="Webhook processing starts before trust is established.",
+                    evidence_snippet="Signature verification does not happen before the payload is processed.",
+                    confidence="high",
+                    proof_type="deterministic_pattern",
+                    suggested_patch="Validate provider signatures before parsing or mutating webhook state.",
+                    verification_state="verified",
                 )
             ],
         )
@@ -195,17 +239,24 @@ class ApiSmokeTests(unittest.TestCase):
         response = self.client.get("/api/wall")
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+        payload = response.json()
+        self.assertEqual(len(payload), 1)
         self.assertEqual(
-            response.json(),
-            [
-                {
-                    "audit_id": "wall-audit",
-                    "repo_url": "https://github.com/acme/example",
-                    "title": "Unsigned webhook path",
-                    "severity": "high",
-                    "created_at": audit.findings[0].created_at.isoformat().replace("+00:00", "Z"),
-                }
-            ],
+            payload[0],
+            {
+                "audit_id": "wall-audit",
+                "finding_id": audit.findings[0].id,
+                "repo_url": "https://github.com/acme/example",
+                "title": "Unsigned webhook path",
+                "severity": "high",
+                "agent_name": "webhook",
+                "check_name": "missing_signature_verification",
+                "impact_summary": "Webhook processing starts before trust is established.",
+                "confidence": "high",
+                "proof_type": "deterministic_pattern",
+                "verification_state": "verified",
+                "created_at": audit.findings[0].created_at.isoformat().replace("+00:00", "Z"),
+            },
         )
 
     def _create_audit(self) -> dict[str, Any]:

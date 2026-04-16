@@ -90,22 +90,22 @@ export function AgentCard({
 
       <div className="mt-5 grid gap-3 xl:grid-cols-[minmax(0,1.05fr)_minmax(16rem,0.95fr)]">
         <div className="rounded-[1.25rem] border border-slate-200 bg-white/80 px-4 py-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Latest note</p>
-          <p className="mt-3 text-sm leading-6 text-slate-700">{agent.message || "No status note has been published yet."}</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Latest update</p>
+          <p className="mt-3 text-sm leading-6 text-slate-700">{agent.message || "No readable update yet."}</p>
         </div>
 
         <div className="rounded-[1.25rem] border border-slate-200 bg-slate-50/90 px-4 py-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Downstream impact</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Impact</p>
           <p className="mt-3 text-sm font-semibold tracking-[-0.02em] text-slate-950">{story.impactLabel}</p>
           <p className="mt-2 text-sm leading-6 text-slate-600">
-            This lane now reads as part of the same response sequence rather than a separate subsystem feed.
+            The next finding, score move, or report update should follow from this step.
           </p>
         </div>
       </div>
 
       <div className="mt-5 rounded-[1.25rem] border border-slate-200 bg-white/80 p-4">
         <div className="flex items-center justify-between gap-3">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Lane flow</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Progress</p>
           <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-slate-500">{story.statusLabel}</p>
         </div>
         <StoryStageRail stages={story.stages} compact className="mt-4" />
@@ -114,11 +114,11 @@ export function AgentCard({
       {showTimestamp ? (
         <dl className="mt-5 grid gap-3 text-sm text-slate-600 sm:grid-cols-2">
           <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-            <dt className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Updated</dt>
+            <dt className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Last update</dt>
             <dd className="mt-2 font-mono text-sm font-semibold text-slate-950">{formatRelativeTime(agent.updated_at)}</dd>
           </div>
           <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-            <dt className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">State</dt>
+            <dt className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Status</dt>
             <dd className="mt-2 font-mono text-sm font-semibold text-slate-950">{titleCase(agent.status)}</dd>
           </div>
         </dl>

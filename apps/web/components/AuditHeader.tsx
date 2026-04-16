@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-import type { AuditState } from "@/lib/types";
+import type { AuditMode, AuditState } from "@/lib/types";
 import { formatDateTime } from "@/lib/format";
 import { cn, repoLabelFromUrl, shortId } from "@/lib/utils";
 import { StatusBadge, formatStatusLabel, toneFromAuditStatus } from "@/components/StatusBadge";
@@ -8,6 +8,7 @@ import { StatusBadge, formatStatusLabel, toneFromAuditStatus } from "@/component
 type AuditHeaderProps = {
   auditId: string;
   repoUrl: string;
+  auditMode?: AuditMode;
   status?: AuditState;
   createdAt?: string;
   updatedAt?: string;
@@ -35,6 +36,7 @@ function AuditHeaderSkeleton() {
 export function AuditHeader({
   auditId,
   repoUrl,
+  auditMode,
   status,
   createdAt,
   updatedAt,
@@ -60,6 +62,11 @@ export function AuditHeader({
             <h1 className="min-w-0 break-all text-3xl font-semibold tracking-[-0.04em] text-slate-950 sm:text-4xl">
               {repoLabelFromUrl(repoUrl)}
             </h1>
+            {auditMode ? (
+              <StatusBadge tone={auditMode === "deep" ? "info" : "neutral"} mono>
+                {auditMode} mode
+              </StatusBadge>
+            ) : null}
             {status ? (
               <StatusBadge tone={toneFromAuditStatus(status)} mono>
                 {formatStatusLabel(status)}

@@ -51,6 +51,7 @@ class StubLiveAgentRunner:
         audit_id: str | None = None,
         ref: str | None = None,
         selected_agents=None,
+        audit_mode: str = "fast",
         execution_mode: str = "auto",
         execution_session=None,
         execution_selection=None,
@@ -61,6 +62,7 @@ class StubLiveAgentRunner:
                 "repo_path": repo_path,
                 "repo_url": repo_url,
                 "audit_id": audit_id,
+                "audit_mode": audit_mode,
                 "execution_mode": execution_mode,
                 "execution_session": execution_session,
                 "execution_selection": execution_selection,
@@ -248,27 +250,62 @@ class AuditOrchestrationTests(unittest.TestCase):
             "Outdated runtime package",
             "Route lacks explicit response model",
         ])
+        self.assertEqual([finding.verification_state for finding in final_audit.findings], ["unverified", "unverified"])
+        self.assertEqual(final_audit.replay_records, [])
         self.assertLess(final_audit.score, 100)
         self.assertEqual(final_audit.coverage, final_audit.coverage_percent)
         self.assertEqual(final_audit.frameworks_detected, ["FastAPI"])
         self.assertEqual(final_audit.scanned_files_count, 8)
         self.assertEqual(final_audit.skipped_files_count, 0)
-        self.assertEqual(final_audit.supported_areas, ["API routes"])
-        self.assertEqual(final_audit.partially_supported_areas, [])
+        self.assertEqual(final_audit.supported_areas, [])
+        self.assertEqual(final_audit.partially_supported_areas, ["API routes"])
         self.assertEqual(final_audit.unsupported_areas, [])
         self.assertEqual(final_audit.checks_run, ["dependency", "api_contract"])
         self.assertEqual(final_audit.checks_skipped, [])
         self.assertEqual(len(self.events.findings), 2)
         self.assertGreaterEqual(len(self.events.score_updates), 1)
+        published_score_reasons = [payload.reason for _, payload in self.events.score_updates if payload.reason]
+        self.assertTrue(any(reason.startswith("Coverage improved because") for reason in published_score_reasons))
+        self.assertTrue(any(reason.startswith("Score dropped because") for reason in published_score_reasons))
         self.assertEqual(len(self.events.completions), 1)
         self.assertIsNone(self.events.completions[0][1].message)
         self.assertEqual(live_agent_runner.calls[0]["repo_path"], str(repo_path))
+        self.assertEqual(live_agent_runner.calls[0]["audit_mode"], "fast")
         self.assertIsNotNone(live_agent_runner.calls[0]["execution_session"])
         self.assertEqual(
             live_agent_runner.calls[0]["execution_selection"].selected_backend,
             "local",
         )
         self.assertFalse(workspace.root.exists())
+
+    def test_live_audit_passes_deep_mode_to_agent_runner(self) -> None:
+        workspace = create_workspace(prefix="audit-live-deep-")
+        self.addCleanup(workspace.cleanup)
+        repo_path = workspace.mkdir("repo")
+        (repo_path / ".git").mkdir()
+        (repo_path / "app").mkdir()
+        (repo_path / "app" / "main.py").write_text("from fastapi import FastAPI\napp = FastAPI()\n", encoding="utf-8")
+        (repo_path / "package.json").write_text('{"name":"example","version":"1.0.0"}', encoding="utf-8")
+
+        acquired_repository = AcquiredRepository(
+            workspace=workspace,
+            repo_path=repo_path,
+            source="https://github.com/acme/example",
+            source_kind="github_url",
+            repo_name="example",
+            owns_workspace=True,
+        )
+        live_agent_runner = StubLiveAgentRunner()
+        runner = AuditRunner(
+            repository=self.repository,
+            agent_runner=live_agent_runner,
+            repository_acquirer=lambda _: acquired_repository,
+        )
+        audit = self._seed_audit(runner, "https://github.com/acme/example", audit_mode="deep")
+
+        runner._run_lifecycle(audit.id, mode="live")
+
+        self.assertEqual(live_agent_runner.calls[0]["audit_mode"], "deep")
 
     def test_live_audit_completes_with_limitation_when_workspace_fails(self) -> None:
         def failing_acquirer(_: str):
@@ -349,10 +386,11 @@ class AuditOrchestrationTests(unittest.TestCase):
         self.assertIn("limited automated coverage", self.events.completions[0][1].message or "")
 
     @staticmethod
-    def _seed_audit(runner: AuditRunner, repo_url: str) -> Audit:
+    def _seed_audit(runner: AuditRunner, repo_url: str, *, audit_mode: str = "fast") -> Audit:
         audit = Audit(
             id=str(uuid4()),
             repo_url=repo_url,
+            audit_mode=audit_mode,
             status="queued",
             score=100,
             agents=runner.build_initial_agents(),

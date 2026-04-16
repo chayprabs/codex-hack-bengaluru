@@ -37,6 +37,7 @@ from ..sandbox.execution_layer import ExecutionMode
 from .agent_runner import AgentExecutionMode, AgentRunResult, AgentSystemRunner, agent_system_runner
 from .audit_coverage import AuditCoverageSnapshot, audit_coverage_service
 from .audit_simulation import AuditLifecycleStep, AuditSimulationPlanBuilder, build_default_simulation_steps
+from .replay_vault import replay_vault_service
 from .scoring import ScoringService, scoring_service
 
 AuditRunMode = Literal["live", "demo"]
@@ -56,6 +57,14 @@ class _LiveAuditState:
     seen_agent_findings: set[tuple[str, str, str, str]] = field(default_factory=set)
     operational_finding_keys: set[str] = field(default_factory=set)
     operational_findings: list[Finding] = field(default_factory=list)
+
+
+_FINDING_SEVERITY_PRIORITY = {
+    "critical": 4,
+    "high": 3,
+    "medium": 2,
+    "low": 1,
+}
 
 
 class AuditRunner:
@@ -189,6 +198,7 @@ class AuditRunner:
                     repo_path=str(acquired_repository.repo_path),
                     repo_url=audit.repo_url,
                     audit_id=audit_id,
+                    audit_mode=audit.audit_mode,
                     execution_mode=effective_execution_mode,
                     execution_session=execution_session,
                     execution_selection=execution_selection,
@@ -227,9 +237,17 @@ class AuditRunner:
                 emitted_finding = Finding(
                     severity=step.finding.severity,
                     title=step.finding.title,
-                    summary=step.finding.summary,
-                    file_path=step.finding.file_path,
-                    line=step.finding.line,
+                    agent_name=step.finding.agent_name,
+                    check_name=step.finding.check_name,
+                    files=list(step.finding.files or ([step.finding.file_path] if step.finding.file_path else [])),
+                    line_hints=list(step.finding.line_hints or ([str(step.finding.line)] if step.finding.line else [])),
+                    impact_summary=step.finding.impact_summary or "",
+                    technical_summary=step.finding.technical_summary or step.finding.summary,
+                    evidence_snippet=step.finding.evidence_snippet,
+                    confidence=step.finding.confidence,
+                    proof_type=step.finding.proof_type,
+                    suggested_patch=step.finding.suggested_patch,
+                    verification_state=step.finding.verification_state,
                     created_at=now,
                 )
                 audit.findings = [*audit.findings, emitted_finding]
@@ -254,6 +272,10 @@ class AuditRunner:
                     audit.partially_supported_areas = list(step.score_update.partially_supported_areas)
                 if step.score_update.unsupported_areas is not None:
                     audit.unsupported_areas = list(step.score_update.unsupported_areas)
+                if step.score_update.needs_manual_review_areas is not None:
+                    audit.needs_manual_review_areas = list(step.score_update.needs_manual_review_areas)
+                if step.score_update.unsupported_technologies is not None:
+                    audit.unsupported_technologies = list(step.score_update.unsupported_technologies)
                 if step.score_update.scanned_files_count is not None:
                     audit.scanned_files_count = step.score_update.scanned_files_count
                 if step.score_update.skipped_files_count is not None:
@@ -280,6 +302,11 @@ class AuditRunner:
 
             if step.completion_message is not None:
                 audit.completion_message = step.completion_message
+            if step.audit_status == "completed":
+                audit.findings = [self._completed_finding(finding) for finding in audit.findings]
+                audit.replay_records = self._build_replay_records(audit)
+            elif step.audit_status == "failed":
+                audit.replay_records = self._build_replay_records(audit)
 
             return audit
 
@@ -315,7 +342,10 @@ class AuditRunner:
         if step.audit_status == "completed":
             publish_audit_complete(
                 audit_id,
-                AuditCompleteEvent.from_audit(updated_audit),
+                AuditCompleteEvent.from_audit(
+                    updated_audit,
+                    message=updated_audit.completion_message,
+                ),
             )
 
         return updated_audit
@@ -338,7 +368,7 @@ class AuditRunner:
                 self._recompute_live_score(
                     audit_id,
                     state,
-                    reason="Repository mapping established the initial coverage baseline.",
+                    reason="Coverage improved because repo mapping established the first supported audit surfaces.",
                 )
             return
 
@@ -364,7 +394,7 @@ class AuditRunner:
                 self._recompute_live_score(
                     audit_id,
                     state,
-                    reason="Planner selected the specialist checks that define current coverage.",
+                    reason="Coverage improved because the planner opened specialist lanes across the mapped repo.",
                 )
             return
 
@@ -443,7 +473,7 @@ class AuditRunner:
             self._recompute_live_score(
                 audit_id,
                 state,
-                reason="Limited automated coverage after repo mapping or planning failed.",
+                reason="Coverage reduced confidence because repo mapping or planning did not finish cleanly.",
             )
             self._set_agent_status(
                 audit_id,
@@ -550,7 +580,7 @@ class AuditRunner:
         self._recompute_live_score(
             audit_id,
             state,
-            reason="Limited automated coverage because the repo workspace could not be acquired.",
+            reason="Coverage reduced confidence because the repository workspace could not be acquired.",
         )
         self._set_agent_status(
             audit_id,
@@ -562,7 +592,7 @@ class AuditRunner:
         self._recompute_live_score(
             audit_id,
             state,
-            reason="Verifier finalized the report with a workspace-coverage limitation.",
+            reason="Coverage reduced confidence because verifier closeout kept a workspace limitation in scope.",
         )
         self._complete_audit(
             audit_id,
@@ -580,6 +610,8 @@ class AuditRunner:
             audit.status = "failed"
             audit.completion_message = reason
             audit.updated_at = now
+            audit.findings = [self._failed_finding(finding) for finding in audit.findings]
+            audit.replay_records = self._build_replay_records(audit)
             next_agents: list[AgentStatus] = []
             for agent in audit.agents:
                 if agent.status == "completed":
@@ -685,6 +717,8 @@ class AuditRunner:
                 tuple(audit.supported_areas),
                 tuple(audit.partially_supported_areas),
                 tuple(audit.unsupported_areas),
+                tuple(audit.needs_manual_review_areas),
+                tuple(audit.unsupported_technologies),
                 audit.scanned_files_count,
                 audit.skipped_files_count,
                 tuple(audit.frameworks_detected),
@@ -698,6 +732,8 @@ class AuditRunner:
                 tuple(coverage_detail.supported_areas),
                 tuple(coverage_detail.partially_supported_areas),
                 tuple(coverage_detail.unsupported_areas),
+                tuple(coverage_detail.needs_manual_review_areas),
+                tuple(coverage_detail.unsupported_technologies),
                 coverage_detail.scanned_files_count,
                 coverage_detail.skipped_files_count,
                 tuple(coverage_detail.frameworks_detected),
@@ -723,6 +759,8 @@ class AuditRunner:
             audit.supported_areas = list(coverage_detail.supported_areas)
             audit.partially_supported_areas = list(coverage_detail.partially_supported_areas)
             audit.unsupported_areas = list(coverage_detail.unsupported_areas)
+            audit.needs_manual_review_areas = list(coverage_detail.needs_manual_review_areas)
+            audit.unsupported_technologies = list(coverage_detail.unsupported_technologies)
             audit.scanned_files_count = coverage_detail.scanned_files_count
             audit.skipped_files_count = coverage_detail.skipped_files_count
             audit.frameworks_detected = list(coverage_detail.frameworks_detected)
@@ -756,6 +794,8 @@ class AuditRunner:
             audit.status = "completed"
             audit.completion_message = message
             audit.updated_at = utc_now()
+            audit.findings = [self._completed_finding(finding) for finding in audit.findings]
+            audit.replay_records = self._build_replay_records(audit)
             return audit
 
         completed_audit = self.repository.update_audit(audit_id, updater)
@@ -782,14 +822,7 @@ class AuditRunner:
             state.seen_agent_findings.add(key)
             self._append_finding(
                 audit_id,
-                Finding(
-                    severity=agent_finding.severity,
-                    title=agent_finding.title,
-                    summary=agent_finding.summary,
-                    file_path=agent_finding.file_path,
-                    line=agent_finding.line_start,
-                    created_at=utc_now(),
-                ),
+                self._audit_finding_from_agent_finding(agent_finding, fallback_agent_name=result.agent_name),
             )
 
     def _record_operational_finding(
@@ -809,7 +842,14 @@ class AuditRunner:
         finding = Finding(
             severity=severity,
             title=title,
-            summary=summary,
+            agent_name="trustlayer",
+            check_name=key,
+            impact_summary=summary,
+            technical_summary=summary,
+            confidence="low",
+            proof_type="manual_review_recommendation",
+            suggested_patch="Resolve the audit limitation, then rerun the affected checks before trusting the result.",
+            verification_state="manual_review",
             created_at=utc_now(),
         )
         state.operational_findings.append(finding)
@@ -846,10 +886,45 @@ class AuditRunner:
     @staticmethod
     def _agent_finding_key(finding: AgentFinding) -> tuple[str, str, str, str]:
         return (
-            finding.rule_id or "",
+            finding.check_name or finding.check_id or finding.rule_id or "",
             finding.title,
-            finding.file_path or "",
-            str(finding.line_start or ""),
+            "|".join(finding.files or ([finding.file_path] if finding.file_path else [])),
+            "|".join(finding.line_hints or ([str(finding.line_start)] if finding.line_start else [])),
+        )
+
+    @staticmethod
+    def _completed_finding(finding: Finding) -> Finding:
+        if finding.verification_state == "in_review":
+            return finding.model_copy(update={"verification_state": "unverified"})
+        return finding
+
+    @staticmethod
+    def _failed_finding(finding: Finding) -> Finding:
+        if finding.verification_state == "manual_review":
+            return finding
+        return finding.model_copy(update={"verification_state": "failed"})
+
+    @staticmethod
+    def _audit_finding_from_agent_finding(
+        agent_finding: AgentFinding,
+        *,
+        fallback_agent_name: str,
+    ) -> Finding:
+        return Finding(
+            severity=agent_finding.severity,
+            title=agent_finding.title,
+            agent_name=agent_finding.agent_name or fallback_agent_name,
+            check_name=agent_finding.check_name,
+            files=list(agent_finding.files or ([agent_finding.file_path] if agent_finding.file_path else [])),
+            line_hints=list(agent_finding.line_hints),
+            impact_summary=agent_finding.impact_summary or "",
+            technical_summary=agent_finding.technical_summary or agent_finding.summary,
+            evidence_snippet=agent_finding.evidence_snippet,
+            confidence=agent_finding.confidence,
+            proof_type=agent_finding.proof_type,
+            suggested_patch=agent_finding.suggested_patch,
+            verification_state=agent_finding.verification_state,
+            created_at=utc_now(),
         )
 
     @staticmethod
@@ -916,12 +991,17 @@ class AuditRunner:
 
     def _score_reason_for_result(self, result: AgentResult) -> str:
         if result.findings:
-            return f"{self._display_agent_name(result.agent_name)} surfaced new findings."
+            finding_reason = self._finding_reason_clause(result.findings)
+            if finding_reason is not None:
+                return f"Score dropped because {finding_reason}."
+            return f"Score dropped because {self._display_agent_name(result.agent_name)} surfaced a new finding."
         if result.status == "failed":
-            return f"{self._display_agent_name(result.agent_name)} could not verify its slice cleanly."
+            return f"Coverage reduced confidence because {self._display_agent_name(result.agent_name)} could not verify its slice."
         if result.status == "needs_review":
-            return f"{self._display_agent_name(result.agent_name)} finished with findings that still need review."
-        return f"{self._display_agent_name(result.agent_name)} completed without introducing new findings."
+            return f"Coverage reduced confidence because {self._display_agent_name(result.agent_name)} left findings for manual review."
+        if result.status == "skipped":
+            return f"Coverage held back because {self._display_agent_name(result.agent_name)} skipped its slice."
+        return f"Coverage improved because {self._display_agent_name(result.agent_name)} cleared its slice without new findings."
 
     @staticmethod
     def _scanner_terminal_status(state: _LiveAuditState) -> str:
@@ -947,8 +1027,11 @@ class AuditRunner:
         state: _LiveAuditState,
     ) -> str:
         if state.operational_findings or run_result.status != "completed":
-            return "Finalized the score from verified findings plus audit coverage limitations."
-        return "Finalized the score from verified findings and completed registered agents."
+            return "Coverage reduced confidence because part of the repo stayed unsupported or unverified."
+        finding_reason = AuditRunner._finding_reason_clause(run_result.findings)
+        if finding_reason is not None:
+            return f"Score stayed lower because {finding_reason}."
+        return "Score improved after verifier closeout found no persisted issues in the audited slices."
 
     @staticmethod
     def _verifier_terminal_message(
@@ -979,11 +1062,60 @@ class AuditRunner:
         return None
 
     @staticmethod
+    def _finding_reason_clause(findings) -> str | None:
+        strongest_finding = AuditRunner._strongest_finding(findings)
+        if strongest_finding is None:
+            return None
+
+        for attribute in ("impact_summary", "technical_summary", "summary", "title"):
+            raw_value = getattr(strongest_finding, attribute, None)
+            cleaned = AuditRunner._clean_reason_text(raw_value)
+            if cleaned is None:
+                continue
+            return AuditRunner._reason_clause(cleaned)
+        return None
+
+    @staticmethod
+    def _strongest_finding(findings):
+        normalized_findings = list(findings or [])
+        if not normalized_findings:
+            return None
+        return max(
+            normalized_findings,
+            key=lambda finding: _FINDING_SEVERITY_PRIORITY.get(str(getattr(finding, "severity", "low")).lower(), 0),
+        )
+
+    @staticmethod
+    def _clean_reason_text(value: object) -> str | None:
+        if value is None:
+            return None
+        cleaned = " ".join(str(value).strip().split())
+        return cleaned or None
+
+    @staticmethod
+    def _reason_clause(value: str) -> str:
+        cleaned = value.rstrip(".!? ")
+        if not cleaned:
+            return "risk stayed in scope"
+
+        if " " not in cleaned:
+            return cleaned.lower()
+
+        first_word, remainder = cleaned.split(" ", 1)
+        if first_word.isupper() and len(first_word) > 1:
+            return cleaned
+        return f"{first_word.lower()} {remainder}".strip()
+
+    @staticmethod
     def _workspace_ready_message(execution_selection) -> str:
         message = "Workspace ready. Running repo mapper and planner."
         if execution_selection.fallback_reason:
             return f"{message} {execution_selection.fallback_reason}"
         return message
+
+    @staticmethod
+    def _build_replay_records(audit: Audit):
+        return replay_vault_service.build_records(audit.id, audit.findings)
 
     @staticmethod
     def _build_agent_update(

@@ -1,8 +1,10 @@
 import type {
   AgentStatus,
   AgentStatusEvent,
+  AgentTrace,
   AgentTraceSource,
   AgentTraceStep,
+  AgentTraceStepStatus,
   Audit,
   AuditCompleteEvent,
   Finding,
@@ -10,6 +12,7 @@ import type {
   FindingSeverity,
   ScoreUpdateEvent,
 } from "@/lib/types";
+import { describeAuditScoreSnapshot, describeScoreUpdate } from "@/lib/scoreNarrative";
 
 export type AuditActivityEvent =
   | {
@@ -168,12 +171,19 @@ function createActivityKey(kind: string, parts: Array<string | number | null | u
   return [kind, ...parts.map((part) => String(part ?? ""))].join(":");
 }
 
-function findingLocationLabel(finding: Pick<Finding, "file_path" | "line">) {
-  if (!finding.file_path) {
+function findingLocationLabel(finding: Pick<Finding, "files" | "line_hints">) {
+  const filePath = finding.files[0];
+  const lineHint = finding.line_hints[0];
+
+  if (!filePath) {
     return "code anchor pending";
   }
 
-  return `${finding.file_path}${finding.line ? `:${finding.line}` : ""}`;
+  return `${filePath}${lineHint ? `:${lineHint}` : ""}`;
+}
+
+function hasFindingLocation(finding: Pick<Finding, "files" | "line_hints">) {
+  return finding.files.length > 0 || finding.line_hints.length > 0;
 }
 
 function normalizeAgentName(value: string) {
@@ -191,6 +201,17 @@ function severityRank(severity: FindingSeverity) {
     default:
       return 1;
   }
+}
+
+function priorityFindings(findings: Finding[]) {
+  return [...findings].sort((left, right) => {
+    const severityDelta = severityRank(right.severity) - severityRank(left.severity);
+    if (severityDelta !== 0) {
+      return severityDelta;
+    }
+
+    return timestampValue(right.created_at) - timestampValue(left.created_at);
+  });
 }
 
 function sortTraceSteps(steps: AgentTraceStep[]) {
@@ -254,7 +275,11 @@ function containsAny(value: string, patterns: string[]) {
 }
 
 function patchSuggestionForFinding(finding: Finding) {
-  const haystack = `${finding.title} ${finding.summary} ${finding.file_path ?? ""}`.toLowerCase();
+  if (finding.suggested_patch) {
+    return finding.suggested_patch;
+  }
+
+  const haystack = `${finding.title} ${finding.impact_summary} ${finding.files.join(" ")} ${finding.evidence_snippet ?? ""}`.toLowerCase();
 
   if (containsAny(haystack, ["webhook", "signature", "unsigned"])) {
     return "Validate provider signatures before parsing payloads or mutating billing state.";
@@ -286,11 +311,55 @@ function patchSuggestionForFinding(finding: Finding) {
 function findingVerificationStage(finding: Finding, audit: Audit): StoryStage {
   const verifier = latestAgent(audit, "verifier");
 
+  if (finding.verification_state === "failed") {
+    return {
+      id: "verification",
+      label: "Verification did not close",
+      detail: "The verifier did not close this finding cleanly in the current run.",
+      status: "failed",
+      tone: "danger",
+      timestamp: audit.updated_at,
+    };
+  }
+
+  if (finding.verification_state === "manual_review") {
+    return {
+      id: "verification",
+      label: "Manual review recommended",
+      detail: "Automation left this finding for human review instead of marking it verifier-reviewed.",
+      status: "pending",
+      tone: "warning",
+      timestamp: verifier?.updated_at ?? audit.updated_at,
+    };
+  }
+
+  if (finding.verification_state === "verified") {
+    return {
+      id: "verification",
+      label: "Verifier-reviewed",
+      detail: "A verifier reviewed this finding and kept it in scope. This does not mean a fix was verified.",
+      status: "complete",
+      tone: "success",
+      timestamp: verifier?.updated_at ?? audit.updated_at,
+    };
+  }
+
+  if (finding.verification_state === "in_review") {
+    return {
+      id: "verification",
+      label: "Verifier running",
+      detail: "Verifier work is still running for this finding.",
+      status: "active",
+      tone: "info",
+      timestamp: verifier?.updated_at ?? audit.updated_at,
+    };
+  }
+
   if (audit.status === "failed" || verifier?.status === "failed") {
     return {
       id: "verification",
-      label: "Verification failed",
-      detail: "The audit ended before this finding could be fully verified.",
+      label: "Verification did not close",
+      detail: "The audit ended before this finding could receive per-finding verifier closeout.",
       status: "failed",
       tone: "danger",
       timestamp: audit.updated_at,
@@ -300,10 +369,10 @@ function findingVerificationStage(finding: Finding, audit: Audit): StoryStage {
   if (verifier?.status === "completed") {
     return {
       id: "verification",
-      label: "Verification passed",
-      detail: "Verifier review closed and this issue remained in the final report.",
-      status: "complete",
-      tone: "success",
+      label: "Verifier lane finished",
+      detail: "The verifier finished the audit, but this finding was not individually verifier-reviewed.",
+      status: "pending",
+      tone: "warning",
       timestamp: verifier.updated_at,
     };
   }
@@ -311,8 +380,8 @@ function findingVerificationStage(finding: Finding, audit: Audit): StoryStage {
   if (verifier?.status === "running") {
     return {
       id: "verification",
-      label: "Verification live",
-      detail: "Verifier is testing impact and score consequences now.",
+      label: "Verifier running",
+      detail: "Verifier work is testing impact and score consequences now.",
       status: "active",
       tone: "info",
       timestamp: verifier.updated_at,
@@ -373,11 +442,14 @@ export function buildSeededAuditActivity(audit: Audit): AuditActivityEvent[] {
               supported_areas: audit.supported_areas,
               partially_supported_areas: audit.partially_supported_areas,
               unsupported_areas: audit.unsupported_areas,
+              needs_manual_review_areas: audit.needs_manual_review_areas,
+              unsupported_technologies: audit.unsupported_technologies,
               scanned_files_count: audit.scanned_files_count,
               skipped_files_count: audit.skipped_files_count,
               frameworks_detected: audit.frameworks_detected,
               checks_run: audit.checks_run,
               checks_skipped: audit.checks_skipped,
+              replay_records: audit.replay_records,
               updated_at: audit.updated_at,
               finding_count: audit.findings.length,
               message: audit.completion_message,
@@ -461,7 +533,7 @@ export function buildFindingStory(finding: Finding, audit: Audit): FindingStory 
   const stages: StoryStage[] = [
     {
       id: "discovered",
-      label: "Exploit discovered",
+      label: "Finding published",
       detail: `Scanner surfaced a ${finding.severity} finding and opened the response lane.`,
       status: "complete",
       tone: toneFromSeverity(finding.severity),
@@ -469,12 +541,12 @@ export function buildFindingStory(finding: Finding, audit: Audit): FindingStory 
     },
     {
       id: "confirmed",
-      label: "Exploit confirmed / evidence captured",
+      label: "Evidence captured",
       detail:
         verificationStage.status === "complete"
-          ? `Evidence anchored at ${evidenceLabel} and carried into the verified report.`
-          : scanner?.status === "completed" || finding.file_path
-            ? `Evidence captured at ${evidenceLabel}. Verifier confirmation is still moving.`
+          ? `Evidence anchored at ${evidenceLabel} and carried into the final report after verifier review.`
+          : scanner?.status === "completed" || hasFindingLocation(finding)
+            ? `Evidence captured at ${evidenceLabel}. Per-finding verifier review is still pending.`
             : "Scanner flagged the path, but the evidence package is still building.",
       status: verificationStage.status === "complete" ? "complete" : scanner?.status === "running" ? "active" : "active",
       tone: verificationStage.status === "complete" ? "warning" : "warning",
@@ -493,12 +565,16 @@ export function buildFindingStory(finding: Finding, audit: Audit): FindingStory 
 
   const currentLabel =
     verificationStage.status === "active"
-      ? "Evidence review live"
-      : verificationStage.status === "complete"
-        ? "Ready for remediation handoff"
-        : verificationStage.status === "failed"
-          ? "Verification blocked"
-          : "Evidence package building";
+      ? "Verifier review live"
+      : finding.verification_state === "verified"
+        ? "Verifier-reviewed finding"
+        : finding.verification_state === "manual_review"
+          ? "Manual review recommended"
+          : verificationStage.status === "complete"
+            ? "Ready for remediation handoff"
+            : verificationStage.status === "failed"
+              ? "Verification blocked"
+              : "Needs verifier follow-up";
 
   return {
     headline: isHighImpact ? "Major finding in motion" : "Finding tracked through the story rail",
@@ -536,7 +612,7 @@ function normalizeBackendTrace(agent: AgentStatus, trace: AgentTrace): AgentOper
 function buildScannerTrace(agent: AgentStatus, audit: Audit, events: AuditActivityEvent[]): AgentOperationalTrace {
   const prioritizedFindings = priorityFindings(audit.findings);
   const leadFinding = prioritizedFindings[0] ?? null;
-  const anchoredFinding = prioritizedFindings.find((finding) => Boolean(finding.file_path)) ?? leadFinding;
+  const anchoredFinding = prioritizedFindings.find((finding) => hasFindingLocation(finding)) ?? leadFinding;
   const planner = latestAgent(audit, "planner");
   const verifier = latestAgent(audit, "verifier");
   const scannerEvents = agentStatusEvents(events, agent.name);
@@ -545,10 +621,10 @@ function buildScannerTrace(agent: AgentStatus, audit: Audit, events: AuditActivi
     scannerEvents.find((event) => event.payload.status === "completed")?.occurredAt ??
     (leadFinding ? leadFinding.created_at : agent.updated_at);
   const evidenceCapturedAt = anchoredFinding?.created_at ?? leadFinding?.created_at ?? null;
-  const verificationState: AgentTraceStepStatus =
+  const verificationStepStatus: AgentTraceStepStatus =
     audit.status === "failed" || verifier?.status === "failed"
       ? "failed"
-      : verifier?.status === "completed"
+      : leadFinding?.verification_state === "verified"
         ? "completed"
         : verifier?.status === "running"
           ? "active"
@@ -556,16 +632,16 @@ function buildScannerTrace(agent: AgentStatus, audit: Audit, events: AuditActivi
 
   const steps: AgentTraceStep[] = [
     {
-      id: createActivityKey("trace", [agent.name, "read_file", anchoredFinding?.file_path ?? planner?.updated_at ?? agent.updated_at]),
+      id: createActivityKey("trace", [agent.name, "read_file", anchoredFinding?.files[0] ?? planner?.updated_at ?? agent.updated_at]),
       kind: "read_file",
       title: "Read file",
-      detail: anchoredFinding?.file_path
-        ? `Opened ${anchoredFinding.file_path} after planner scope and finding activity pointed to it as a likely boundary failure.`
+      detail: anchoredFinding?.files[0]
+        ? `Opened ${anchoredFinding.files[0]} after planner scope and finding activity pointed to it as a likely boundary failure.`
         : planner?.status === "completed" || agent.status !== "queued"
           ? "Opened scoped files inside the mapped attack surface before promoting any candidate into the feed."
           : "Waiting for planner scope before opening candidate files.",
       status:
-        anchoredFinding?.file_path || planner?.status === "completed" || agent.status !== "queued"
+        anchoredFinding?.files[0] || planner?.status === "completed" || agent.status === "running" || agent.status === "completed"
           ? "completed"
           : agent.status === "failed"
             ? "failed"
@@ -624,13 +700,13 @@ function buildScannerTrace(agent: AgentStatus, audit: Audit, events: AuditActivi
       id: createActivityKey("trace", [agent.name, "evidence_recorded", anchoredFinding?.id ?? leadFinding?.id ?? agent.updated_at]),
       kind: "evidence_recorded",
       title: "Recorded evidence",
-      detail: anchoredFinding?.file_path
+      detail: anchoredFinding && hasFindingLocation(anchoredFinding)
         ? `Evidence captured at ${findingLocationLabel(anchoredFinding)} and attached to the reportable finding.`
         : leadFinding
           ? "Finding has been published, but file-level evidence anchors are still being attached."
           : "Evidence will be recorded after a candidate is confirmed.",
       status:
-        anchoredFinding?.file_path
+        anchoredFinding && hasFindingLocation(anchoredFinding)
           ? "completed"
           : leadFinding
             ? "active"
@@ -665,16 +741,27 @@ function buildScannerTrace(agent: AgentStatus, audit: Audit, events: AuditActivi
     {
       id: createActivityKey("trace", [agent.name, "verification", verifier?.updated_at ?? audit.updated_at]),
       kind: "verification",
-      title: verificationState === "failed" ? "Verification failed" : verificationState === "completed" ? "Verified result" : "Verified result",
+      title:
+        verificationStepStatus === "failed"
+          ? "Verification did not close"
+          : verificationStepStatus === "completed"
+            ? "Verifier reviewed finding"
+            : verifier?.status === "completed"
+              ? "Verifier lane finished"
+              : verifier?.status === "running"
+                ? "Verifier running"
+                : "Verification queued",
       detail:
-        verificationState === "completed"
-          ? "Verifier reviewed the scanner output and closed the strongest lead into the final report."
-          : verificationState === "active"
-            ? "Verifier is testing the recorded evidence and score impact now."
-            : verificationState === "failed"
-              ? "Verification halted before the scanner lead could be cleanly closed."
-              : "Verification is queued behind evidence capture and final review.",
-      status: verificationState,
+        verificationStepStatus === "completed"
+          ? "Verifier reviewed the scanner output and kept the strongest lead in scope."
+          : verifier?.status === "completed"
+            ? "Verifier finished the audit, but this lead was not individually verifier-reviewed."
+            : verificationStepStatus === "active"
+              ? "Verifier is testing the recorded evidence and score impact now."
+              : verificationStepStatus === "failed"
+                ? "Verification halted before the scanner lead could be cleanly closed."
+                : "Verification is queued behind evidence capture and final review.",
+      status: verificationStepStatus,
       timestamp: verifier?.updated_at ?? (audit.status === "completed" || audit.status === "failed" ? audit.updated_at : null),
       tool: "Verification",
       location: leadFinding ? findingLocationLabel(leadFinding) : null,
@@ -799,6 +886,8 @@ export function buildAgentLaneStory(agent: AgentStatus, audit: Audit): AgentLane
   }
 
   const verifier = latestAgent(audit, "verifier");
+  const verifiedFindingCount = audit.findings.filter((finding) => finding.verification_state === "verified").length;
+  const unresolvedFindingCount = audit.findings.length - verifiedFindingCount;
   const stages: StoryStage[] = [
     {
       id: "review",
@@ -818,10 +907,12 @@ export function buildAgentLaneStory(agent: AgentStatus, audit: Audit): AgentLane
     },
     {
       id: "closure",
-      label: audit.status === "failed" ? "Verification failed" : "Verification passed",
+      label: audit.status === "failed" ? "Verification did not close" : "Verifier lane finished",
       detail:
         audit.status === "completed"
-          ? "The attack story is closed and ready for remediation handoff."
+          ? verifiedFindingCount > 0
+            ? `The verifier lane closed with ${verifiedFindingCount} individually verifier-reviewed finding${verifiedFindingCount === 1 ? "" : "s"}.`
+            : "The verifier lane closed, but no finding was individually verifier-reviewed."
           : audit.status === "failed"
             ? "The report closed early and needs manual follow-up."
             : "Waiting for the report to close.",
@@ -833,7 +924,7 @@ export function buildAgentLaneStory(agent: AgentStatus, audit: Audit): AgentLane
 
   return {
     roleLabel: "Verification lane",
-    missionLabel: "Confirms the strongest exploit paths and closes the report with review-ready evidence.",
+    missionLabel: "Reviews the strongest findings and closes the report with explicit caveats about what was and was not verified.",
     impactLabel: audit.status === "completed" ? "Report closed" : `${majorFindingCount(audit)} major findings under review`,
     statusLabel: currentStageLabel(stages),
     isLive: agent.status === "running",
@@ -846,11 +937,16 @@ export function buildAttackStorySummary(audit: Audit): AttackStorySummary {
   const scanner = latestAgent(audit, "scanner");
   const verifier = latestAgent(audit, "verifier");
   const majorFindings = majorFindingCount(audit);
+  const verifiedFindingCount = audit.findings.filter((finding) => finding.verification_state === "verified").length;
+  const unresolvedFindingCount = audit.findings.length - verifiedFindingCount;
+  const supportedAreaCount = audit.supported_areas.length;
+  const unresolvedAreaCount = audit.partially_supported_areas.length + audit.unsupported_areas.length;
+  const checkCount = audit.checks_run.length;
 
   const stages: StoryStage[] = [
     {
       id: "discover",
-      label: "Exploit discovered",
+      label: "Findings published",
       detail: audit.findings.length
         ? `${audit.findings.length} findings surfaced across the current audit story.`
         : "Scanner has not surfaced findings yet.",
@@ -860,10 +956,12 @@ export function buildAttackStorySummary(audit: Audit): AttackStorySummary {
     },
     {
       id: "confirm",
-      label: "Exploit confirmed / evidence captured",
+      label: "Evidence captured",
       detail:
         verifier?.status === "completed"
-          ? `${majorFindings || audit.findings.length} findings carried through evidence review.`
+          ? verifiedFindingCount > 0
+            ? `${verifiedFindingCount} finding${verifiedFindingCount === 1 ? "" : "s"} were individually verifier-reviewed.`
+            : "Evidence was captured, but no finding was individually verifier-reviewed."
           : verifier?.status === "running"
             ? "Verifier is confirming impact and sorting signal from noise."
             : audit.findings.length
@@ -894,10 +992,12 @@ export function buildAttackStorySummary(audit: Audit): AttackStorySummary {
     },
     {
       id: "verify",
-      label: audit.status === "failed" ? "Verification failed" : "Verification passed",
+      label: audit.status === "failed" ? "Verification did not close" : "Verifier lane finished",
       detail:
         audit.status === "completed"
-          ? "The report is closed and remediation can move from red into green verification work."
+          ? verifiedFindingCount > 0
+            ? `${verifiedFindingCount} finding${verifiedFindingCount === 1 ? "" : "s"} were verifier-reviewed and ${unresolvedFindingCount} remained unresolved or manual-review only.`
+            : "The report is closed, but the remaining findings still need per-finding verifier review."
           : audit.status === "failed"
             ? "Verification closed early and needs manual follow-up."
             : verifier?.status === "running"
@@ -920,7 +1020,7 @@ export function buildAttackStorySummary(audit: Audit): AttackStorySummary {
   const phaseLabel = currentStageLabel(stages);
   const headline =
     audit.status === "completed"
-      ? "Attack story closed with review-ready evidence"
+      ? "Audit story closed with explicit review state"
       : majorFindings
         ? `${majorFindings} major finding${majorFindings === 1 ? "" : "s"} moving through confirmation`
         : audit.findings.length
@@ -928,7 +1028,15 @@ export function buildAttackStorySummary(audit: Audit): AttackStorySummary {
           : "Attack surface is still being mapped";
   const detail =
     audit.status === "completed"
-      ? "High-impact issues now read as a contained response story instead of isolated scanner rows."
+      ? checkCount || supportedAreaCount
+        ? `${checkCount} checks ran across ${supportedAreaCount} supported area${supportedAreaCount === 1 ? "" : "s"}. ${
+            unresolvedAreaCount > 0
+              ? `${unresolvedAreaCount} area${unresolvedAreaCount === 1 ? "" : "s"} remained partial or out of scope.`
+              : verifiedFindingCount > 0
+                ? "The report is ready for remediation handoff."
+                : "The report closed without per-finding verifier review."
+          }`
+        : "High-impact issues now read as a contained response story instead of isolated scanner rows."
       : verifier?.status === "running"
         ? "The verifier lane is actively moving major findings from discovery into confirmed response steps."
         : scanner?.status === "running"
@@ -959,7 +1067,7 @@ export function buildStoryMoments(
         const isHighImpact = HIGH_IMPACT_SEVERITIES.includes(finding.severity);
         return {
           id: event.key,
-          label: isHighImpact ? "Major finding landed" : "Finding landed",
+          label: isHighImpact ? "Major finding published" : "Finding published",
           detail: `${finding.title} at ${findingLocationLabel(finding)}.`,
           timestamp: event.occurredAt,
           tone: isHighImpact ? "danger" : "warning",
@@ -972,10 +1080,13 @@ export function buildStoryMoments(
         const update = event.payload;
         return {
           id: event.key,
-          label: "Score moved",
-          detail:
-            update.reason ??
-            `TrustScore moved while coverage settled at ${update.coverage}/100 (${update.coverage_band}).`,
+          label:
+            update.delta !== null && update.delta < 0
+              ? "TrustScore dropped"
+              : update.delta !== null && update.delta > 0
+                ? "TrustScore improved"
+                : "TrustScore held",
+          detail: describeScoreUpdate(update),
           timestamp: event.occurredAt,
           tone: toneFromScoreDelta(update.delta),
           highlight: isRecentTimestamp(event.occurredAt),
@@ -987,7 +1098,7 @@ export function buildStoryMoments(
         const completionTone: StoryMomentTone = audit.status === "failed" ? "danger" : "success";
         return {
           id: event.key,
-          label: audit.status === "failed" ? "Report closed with failure" : "Report closed",
+          label: audit.status === "failed" ? "Report closed early" : "Report locked",
           detail:
             event.payload.message ??
             (audit.status === "failed"
@@ -1002,8 +1113,8 @@ export function buildStoryMoments(
 
       return {
         id: event.key,
-        label: `${event.payload.name} updated`,
-        detail: event.payload.message || `${event.payload.name} changed state.`,
+        label: `${event.payload.name} published`,
+        detail: event.payload.message || `${event.payload.name} published a new lane update.`,
         timestamp: event.occurredAt,
         tone: toneFromAgentState(event.payload.status),
         highlight: isRecentTimestamp(event.occurredAt),
@@ -1013,7 +1124,7 @@ export function buildStoryMoments(
 
   const transportMoment: StoryMoment = {
     id: `transport:${transportLabel}:${audit.updated_at}`,
-    label: "Transport state",
+    label: "Stream heartbeat",
     detail: `${transportLabel} is keeping the attack story current.`,
     timestamp: audit.updated_at,
     tone: "info",
@@ -1044,10 +1155,17 @@ export function buildScoreMoments(
             coverage_band: audit.coverage_band,
             coverage_summary: audit.coverage_summary,
             confidence_limited: audit.confidence_limited,
-            reason:
-              audit.findings.length > 0
-                ? `${audit.findings.length} findings shifted the score from the clean baseline into review.`
-                : "Initial intake established the current trust baseline.",
+            reason: describeAuditScoreSnapshot(audit),
+            supported_areas: audit.supported_areas,
+            partially_supported_areas: audit.partially_supported_areas,
+            unsupported_areas: audit.unsupported_areas,
+            needs_manual_review_areas: audit.needs_manual_review_areas,
+            unsupported_technologies: audit.unsupported_technologies,
+            scanned_files_count: audit.scanned_files_count,
+            skipped_files_count: audit.skipped_files_count,
+            frameworks_detected: audit.frameworks_detected,
+            checks_run: audit.checks_run,
+            checks_skipped: audit.checks_skipped,
             updated_at: audit.updated_at,
           },
         ];
@@ -1060,11 +1178,13 @@ export function buildScoreMoments(
       id: createActivityKey("score_update", [event.audit_id, event.updated_at, event.score, index]),
       label:
         index === 0
-          ? "Current score posture"
+          ? "Current TrustScore posture"
           : event.delta !== null && event.delta < 0
             ? "Risk expanded"
-            : "Score stabilized",
-      detail: event.reason ?? "The score changed after a new audit event.",
+            : event.delta !== null && event.delta > 0
+              ? "TrustScore recovered"
+              : "TrustScore held",
+      detail: describeScoreUpdate(event),
       score: event.score,
       previousScore: event.previous_score,
       delta: event.delta,

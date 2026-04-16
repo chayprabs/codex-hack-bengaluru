@@ -19,6 +19,7 @@ import type {
   AuditCompleteEvent,
   AuditStreamConnectionState,
   FindingEvent,
+  ReplayRecord,
   ScoreUpdateEvent,
 } from "@/lib/types";
 
@@ -73,7 +74,7 @@ function keepStringList(current: string[], incoming: unknown) {
   }
 
   const nextValues = incoming
-    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .map((item: unknown) => (typeof item === "string" ? item.trim() : ""))
     .filter(Boolean);
 
   return nextValues.length > 0 ? nextValues : [];
@@ -85,6 +86,61 @@ function keepNumber(current: number, incoming: unknown) {
 
 function keepString(current: string, incoming: unknown) {
   return typeof incoming === "string" && incoming.trim() ? incoming : current;
+}
+
+function keepReplayRecords(current: ReplayRecord[], incoming: unknown): ReplayRecord[] {
+  if (!Array.isArray(incoming)) {
+    return current;
+  }
+
+  return incoming.map((record: unknown): ReplayRecord => {
+    const candidate =
+      typeof record === "object" && record !== null
+        ? (record as Partial<ReplayRecord> & Record<string, unknown>)
+        : {};
+
+    return {
+      id: typeof candidate.id === "string" ? candidate.id : "",
+      finding_id: typeof candidate.finding_id === "string" ? candidate.finding_id : null,
+      title: typeof candidate.title === "string" && candidate.title.trim() ? candidate.title : "Replay record",
+      finding_type:
+        typeof candidate.finding_type === "string" && candidate.finding_type.trim() ? candidate.finding_type : "finding",
+      file_targets: Array.isArray(candidate.file_targets)
+        ? candidate.file_targets.filter((item: unknown): item is string => typeof item === "string" && item.trim().length > 0)
+        : [],
+      confidence: candidate.confidence === "high" || candidate.confidence === "medium" ? candidate.confidence : "low",
+      proof_type:
+        candidate.proof_type === "runtime_check" ||
+        candidate.proof_type === "exploit_succeeded" ||
+        candidate.proof_type === "manual_review_recommendation"
+          ? candidate.proof_type
+          : "deterministic_pattern",
+      verification_state:
+        candidate.verification_state === "verified" ||
+        candidate.verification_state === "in_review" ||
+        candidate.verification_state === "manual_review" ||
+        candidate.verification_state === "failed"
+          ? candidate.verification_state
+          : "unverified",
+      proof_summary:
+        typeof candidate.proof_summary === "string" && candidate.proof_summary.trim()
+          ? candidate.proof_summary
+          : "Proof summary pending.",
+      verification_summary:
+        typeof candidate.verification_summary === "string" && candidate.verification_summary.trim()
+          ? candidate.verification_summary
+          : "Verification summary pending.",
+      suggested_regression_test:
+        typeof candidate.suggested_regression_test === "string" && candidate.suggested_regression_test.trim()
+          ? candidate.suggested_regression_test
+          : "Add a focused regression before trusting the remediation.",
+      generated_artifact_path:
+        typeof candidate.generated_artifact_path === "string" && candidate.generated_artifact_path.trim()
+          ? candidate.generated_artifact_path
+          : null,
+      readiness: candidate.readiness === "regression_ready" ? "regression_ready" : "needs_manual_followup",
+    };
+  });
 }
 
 function mergeSnapshotActivity(current: AuditActivityEvent[], snapshot: Audit) {
@@ -170,6 +226,13 @@ function mergeFinding(audit: Audit, event: FindingEvent) {
     };
   }
 
+  const technicalSummary =
+    typeof event.technical_summary === "string" && event.technical_summary.trim()
+      ? event.technical_summary
+      : typeof event.summary === "string" && event.summary.trim()
+        ? event.summary
+        : event.impact_summary ?? event.title;
+
   return {
     ...audit,
     findings: [
@@ -178,9 +241,18 @@ function mergeFinding(audit: Audit, event: FindingEvent) {
         id: event.id,
         severity: event.severity,
         title: event.title,
-        summary: event.summary,
-        file_path: event.file_path,
-        line: event.line,
+        summary: technicalSummary,
+        technical_summary: technicalSummary,
+        agent_name: event.agent_name ?? null,
+        check_name: event.check_name ?? null,
+        files: event.files ?? [],
+        line_hints: event.line_hints ?? [],
+        impact_summary: event.impact_summary ?? event.title,
+        evidence_snippet: event.evidence_snippet ?? null,
+        confidence: event.confidence ?? "high",
+        proof_type: event.proof_type ?? "deterministic_pattern",
+        suggested_patch: event.suggested_patch ?? null,
+        verification_state: event.verification_state ?? "unverified",
         created_at: event.created_at,
       },
     ],
@@ -188,7 +260,7 @@ function mergeFinding(audit: Audit, event: FindingEvent) {
   };
 }
 
-function mergeScoreUpdate(audit: Audit, event: ScoreUpdateEvent) {
+function mergeScoreUpdate(audit: Audit, event: ScoreUpdateEvent): Audit {
   const nextCoverage = keepNumber(audit.coverage, event.coverage);
 
   return {
@@ -202,6 +274,8 @@ function mergeScoreUpdate(audit: Audit, event: ScoreUpdateEvent) {
     supported_areas: keepStringList(audit.supported_areas, event.supported_areas),
     partially_supported_areas: keepStringList(audit.partially_supported_areas, event.partially_supported_areas),
     unsupported_areas: keepStringList(audit.unsupported_areas, event.unsupported_areas),
+    needs_manual_review_areas: keepStringList(audit.needs_manual_review_areas, event.needs_manual_review_areas),
+    unsupported_technologies: keepStringList(audit.unsupported_technologies, event.unsupported_technologies),
     scanned_files_count: keepNumber(audit.scanned_files_count, event.scanned_files_count),
     skipped_files_count: keepNumber(audit.skipped_files_count, event.skipped_files_count),
     frameworks_detected: keepStringList(audit.frameworks_detected, event.frameworks_detected),
@@ -211,7 +285,7 @@ function mergeScoreUpdate(audit: Audit, event: ScoreUpdateEvent) {
   };
 }
 
-function mergeAuditComplete(audit: Audit, event: AuditCompleteEvent) {
+function mergeAuditComplete(audit: Audit, event: AuditCompleteEvent): Audit {
   const nextCoverage = keepNumber(audit.coverage, event.coverage);
 
   return {
@@ -227,11 +301,14 @@ function mergeAuditComplete(audit: Audit, event: AuditCompleteEvent) {
     supported_areas: keepStringList(audit.supported_areas, event.supported_areas),
     partially_supported_areas: keepStringList(audit.partially_supported_areas, event.partially_supported_areas),
     unsupported_areas: keepStringList(audit.unsupported_areas, event.unsupported_areas),
+    needs_manual_review_areas: keepStringList(audit.needs_manual_review_areas, event.needs_manual_review_areas),
+    unsupported_technologies: keepStringList(audit.unsupported_technologies, event.unsupported_technologies),
     scanned_files_count: keepNumber(audit.scanned_files_count, event.scanned_files_count),
     skipped_files_count: keepNumber(audit.skipped_files_count, event.skipped_files_count),
     frameworks_detected: keepStringList(audit.frameworks_detected, event.frameworks_detected),
     checks_run: keepStringList(audit.checks_run, event.checks_run),
     checks_skipped: keepStringList(audit.checks_skipped, event.checks_skipped),
+    replay_records: keepReplayRecords(audit.replay_records, event.replay_records),
     completion_message: event.message ?? null,
     updated_at: keepLatestTimestamp(audit.updated_at, event.updated_at),
   };
@@ -263,11 +340,14 @@ function toCompletionEvent(audit: Audit): AuditCompleteEvent | null {
     supported_areas: audit.supported_areas,
     partially_supported_areas: audit.partially_supported_areas,
     unsupported_areas: audit.unsupported_areas,
+    needs_manual_review_areas: audit.needs_manual_review_areas,
+    unsupported_technologies: audit.unsupported_technologies,
     scanned_files_count: audit.scanned_files_count,
     skipped_files_count: audit.skipped_files_count,
     frameworks_detected: audit.frameworks_detected,
     checks_run: audit.checks_run,
     checks_skipped: audit.checks_skipped,
+    replay_records: audit.replay_records,
     updated_at: audit.updated_at,
     finding_count: audit.findings.length,
     message: audit.completion_message,
@@ -390,6 +470,8 @@ export function useAuditStream({
           supported_areas: nextAudit.supported_areas,
           partially_supported_areas: nextAudit.partially_supported_areas,
           unsupported_areas: nextAudit.unsupported_areas,
+          needs_manual_review_areas: nextAudit.needs_manual_review_areas,
+          unsupported_technologies: nextAudit.unsupported_technologies,
           scanned_files_count: nextAudit.scanned_files_count,
           skipped_files_count: nextAudit.skipped_files_count,
           frameworks_detected: nextAudit.frameworks_detected,

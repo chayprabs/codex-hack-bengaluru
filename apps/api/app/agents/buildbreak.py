@@ -271,20 +271,21 @@ class BuildbreakAgent(BaseAgent):
 
         scripts = payload.get("scripts") if isinstance(payload.get("scripts"), dict) else {}
         package_manager = self._node_package_manager(project.path, payload)
-        has_metadata = bool(payload.get("packageManager")) or self._has_node_lockfile(project.path)
-        if not has_metadata:
+        has_package_manager = bool(payload.get("packageManager"))
+        has_lockfile = self._has_node_lockfile(project.path)
+        if not has_package_manager and has_lockfile:
             findings.append(
                 self._finding(
                     kind="missing_package_manager_metadata",
-                    severity="medium",
+                    severity="low",
                     title="Missing Node package manager metadata",
                     description=(
-                        "This Node project has a package.json but no lockfile or packageManager field, "
-                        "which makes installs and builds less reproducible."
+                        "This Node project has a lockfile but package.json does not declare a packageManager, "
+                        "which can make workspace tooling assumptions less obvious."
                     ),
                     file_path=f"{project.display_path}/package.json",
                     suggested_remediation=(
-                        "Commit the appropriate lockfile and preferably set packageManager in package.json."
+                        "Declare the intended package manager in package.json so scripts and audits use the expected toolchain."
                     ),
                 )
             )

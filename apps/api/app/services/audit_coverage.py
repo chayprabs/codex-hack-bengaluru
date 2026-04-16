@@ -53,6 +53,8 @@ class AuditCoverageSnapshot(StrictModel):
     supported_areas: list[str] = Field(default_factory=list)
     partially_supported_areas: list[str] = Field(default_factory=list)
     unsupported_areas: list[str] = Field(default_factory=list)
+    needs_manual_review_areas: list[str] = Field(default_factory=list)
+    unsupported_technologies: list[str] = Field(default_factory=list)
     scanned_files_count: int = 0
     skipped_files_count: int = 0
     frameworks_detected: list[str] = Field(default_factory=list)
@@ -109,6 +111,7 @@ class AuditCoverageService:
         supported_areas: list[str] = []
         partially_supported_areas: list[str] = []
         unsupported_areas: list[str] = []
+        surface_manual_review_areas: list[str] = []
 
         for surface in self._present_surfaces(repo_map):
             surface_status = self._surface_status(
@@ -121,13 +124,21 @@ class AuditCoverageService:
                 supported_areas.append(surface)
             elif surface_status == "partial":
                 partially_supported_areas.append(surface)
+            elif surface_status == "needs_manual_review":
+                surface_manual_review_areas.append(surface)
             else:
                 unsupported_areas.append(surface)
 
-        if repo_map is not None:
-            unsupported_areas.extend(
-                f"Unknown zone: {zone.path}" for zone in repo_map.unsupported_zones
-            )
+        unsupported_technologies = self._unsupported_technologies(repo_map)
+        repo_manual_review_areas = self._manual_review_zones(repo_map)
+        operational_manual_review_notes = self._operational_review_notes(repo_map)
+        needs_manual_review_areas = self._ordered_unique(
+            [
+                *surface_manual_review_areas,
+                *repo_manual_review_areas,
+                *operational_manual_review_notes,
+            ]
+        )
 
         frameworks_detected = self._frameworks_detected(repo_map)
         coverage_percent = self._coverage_percent(
@@ -138,6 +149,8 @@ class AuditCoverageService:
             supported_areas=supported_areas,
             partially_supported_areas=partially_supported_areas,
             unsupported_areas=unsupported_areas,
+            manual_review_penalty_count=len(surface_manual_review_areas) + len(repo_manual_review_areas),
+            unsupported_technologies=unsupported_technologies,
             checks_skipped=checks_skipped,
             limitations_count=limitations_count,
         )
@@ -146,6 +159,8 @@ class AuditCoverageService:
             coverage_percent < 55
             or bool(partially_supported_areas)
             or bool(unsupported_areas)
+            or bool(needs_manual_review_areas)
+            or bool(unsupported_technologies)
             or bool(checks_skipped)
         )
         summary = self._coverage_summary(
@@ -157,6 +172,8 @@ class AuditCoverageService:
             supported_areas=supported_areas,
             partially_supported_areas=partially_supported_areas,
             unsupported_areas=unsupported_areas,
+            needs_manual_review_areas=needs_manual_review_areas,
+            unsupported_technologies=unsupported_technologies,
             coverage_band=coverage_band,
             confidence_limited=confidence_limited,
         )
@@ -169,6 +186,8 @@ class AuditCoverageService:
             supported_areas=supported_areas,
             partially_supported_areas=partially_supported_areas,
             unsupported_areas=unsupported_areas,
+            needs_manual_review_areas=needs_manual_review_areas,
+            unsupported_technologies=unsupported_technologies,
             scanned_files_count=repo_map.scan.scanned_files if repo_map is not None else 0,
             skipped_files_count=repo_map.scan.files_skipped if repo_map is not None else 0,
             frameworks_detected=frameworks_detected,
@@ -215,11 +234,17 @@ class AuditCoverageService:
         if not checks:
             return "unsupported"
 
-        statuses = [result_statuses.get(check) for check in checks if result_statuses.get(check)]
-        if any(status == "completed" for status in statuses):
+        observed_statuses = [result_statuses.get(check) for check in checks if result_statuses.get(check)]
+        if any(status == "needs_review" for status in observed_statuses):
+            return "needs_manual_review"
+        if len(observed_statuses) == len(checks) and all(status == "completed" for status in observed_statuses):
             return "supported"
-        if any(status in {"failed", "needs_review"} for status in statuses):
+        if any(status == "completed" for status in observed_statuses):
             return "partial"
+        if any(status in {"failed", "running", "queued"} for status in observed_statuses):
+            return "partial"
+        if any(status == "skipped" for status in observed_statuses):
+            return "unsupported"
 
         assignment_statuses = [
             planned_statuses.get(check)
@@ -239,6 +264,33 @@ class AuditCoverageService:
             [stack.name for stack in repo_map.stacks if stack.category != "runtime"]
         )
 
+    def _unsupported_technologies(self, repo_map: RepoMap | None) -> list[str]:
+        if repo_map is None:
+            return []
+        return self._ordered_unique([item.name for item in repo_map.unsupported_technologies])
+
+    def _manual_review_zones(self, repo_map: RepoMap | None) -> list[str]:
+        if repo_map is None:
+            return []
+
+        return self._ordered_unique(
+            [
+                f"Unknown zone: {zone.path}"
+                for zone in (repo_map.needs_manual_review_zones or repo_map.unsupported_zones)
+            ]
+        )
+
+    def _operational_review_notes(self, repo_map: RepoMap | None) -> list[str]:
+        if repo_map is None:
+            return []
+
+        notes = []
+        if repo_map.scan.truncated:
+            notes.append("Scan scope capped for speed")
+        if repo_map.scan.files_skipped > 0:
+            notes.append("Skipped files outside scan limits")
+        return self._ordered_unique(notes)
+
     def _coverage_percent(
         self,
         *,
@@ -249,6 +301,8 @@ class AuditCoverageService:
         supported_areas: Sequence[str],
         partially_supported_areas: Sequence[str],
         unsupported_areas: Sequence[str],
+        manual_review_penalty_count: int,
+        unsupported_technologies: Sequence[str],
         checks_skipped: Sequence[str],
         limitations_count: int,
     ) -> int:
@@ -287,7 +341,8 @@ class AuditCoverageService:
         if repo_map.scan.truncated:
             coverage -= 8
         coverage -= min(repo_map.scan.files_skipped, 8)
-        coverage -= min(len(repo_map.unsupported_zones) * 4, 16)
+        coverage -= min(len(unsupported_technologies) * 7, 21)
+        coverage -= min(manual_review_penalty_count * 3, 12)
         coverage -= min(len(checks_skipped) * 3, 12)
         coverage -= min(limitations_count * 8, 24)
         return max(0, min(100, coverage))
@@ -303,6 +358,8 @@ class AuditCoverageService:
         supported_areas: list[str],
         partially_supported_areas: list[str],
         unsupported_areas: list[str],
+        needs_manual_review_areas: list[str],
+        unsupported_technologies: list[str],
         coverage_band: CoverageBand,
         confidence_limited: bool,
     ) -> str:
@@ -314,18 +371,34 @@ class AuditCoverageService:
             return "Audit completed without a stable repository map, so coverage is minimal."
 
         if not checks_run and audit_status != "completed":
-            return (
-                f"Repository mapped {repo_map.scan.scanned_files} files. "
-                "Coverage is still narrow until specialist checks finish."
-            )
+            return f"Mapped {repo_map.scan.scanned_files} files. Coverage is still building."
 
-        confidence_suffix = " Confidence is still limited." if confidence_limited else ""
-        return (
-            f"Coverage is {coverage_percent}% ({coverage_band}) with {len(checks_run)} checks run and "
-            f"{len(checks_skipped)} checks skipped. Supported areas: {len(supported_areas)}, "
-            f"partial areas: {len(partially_supported_areas)}, unsupported areas: {len(unsupported_areas)}."
-            f"{confidence_suffix}"
-        )
+        parts = [
+            f"Coverage {coverage_percent}% ({coverage_band})",
+            f"checks run: {len(checks_run)}",
+            f"checks skipped: {len(checks_skipped)}",
+            f"supported: {len(supported_areas)}",
+            f"partial: {len(partially_supported_areas)}",
+            f"unsupported: {len(unsupported_areas)}",
+            f"manual review: {len(needs_manual_review_areas)}",
+        ]
+        notes: list[str] = []
+        if unsupported_technologies:
+            unsupported_preview = ", ".join(unsupported_technologies[:2])
+            if len(unsupported_technologies) > 2:
+                unsupported_preview = f"{unsupported_preview} +{len(unsupported_technologies) - 2} more"
+            notes.append(f"unsupported tech: {unsupported_preview}")
+        if repo_map.scan.truncated:
+            notes.append("scan scope capped for speed")
+        if repo_map.scan.files_skipped > 0:
+            notes.append(f"{repo_map.scan.files_skipped} files skipped")
+
+        summary = ". ".join(parts) + "."
+        if notes:
+            summary += " " + ". ".join(note[:1].upper() + note[1:] for note in notes) + "."
+        if confidence_limited:
+            summary += " Confidence is still limited."
+        return summary
 
     def _has_frontend_signal(self, repo_map: RepoMap) -> bool:
         if any(stack.slug in FRONTEND_STACKS for stack in repo_map.stacks):

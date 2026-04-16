@@ -75,7 +75,7 @@ class WebhookAgent(BaseAgent):
     description = "Looks for webhook verification gaps and weak idempotency signals in mapped webhook slices."
     repo_map_inputs = ("webhooks", "routes", "auth", "config", "env")
 
-    def __init__(self, *, max_files: int = 50, max_findings: int = 20) -> None:
+    def __init__(self, *, max_files: int = 50, max_findings: int = 16) -> None:
         self.max_files = max_files
         self.max_findings = max_findings
 
@@ -199,7 +199,9 @@ class WebhookAgent(BaseAgent):
         if verification_finding is not None:
             findings.append(verification_finding)
 
-        idempotency_finding = self._idempotency_review(relative_path, lower_text, text)
+        idempotency_finding = None
+        if verification_finding is None and not any(item.kind == "signature_verification_disabled" for item in findings):
+            idempotency_finding = self._idempotency_review(relative_path, lower_text, text)
         if idempotency_finding is not None:
             findings.append(idempotency_finding)
 
@@ -231,7 +233,7 @@ class WebhookAgent(BaseAgent):
                     description=description,
                     file_path=relative_path,
                     line_start=line_number,
-                    evidence_excerpt=trim_output(raw_line, limit=180),
+                    evidence_excerpt=trim_output(raw_line, limit=160),
                     suggested_remediation=suggested_remediation,
                 )
             )
@@ -251,7 +253,7 @@ class WebhookAgent(BaseAgent):
         if any(marker in lower_text for marker in GENERIC_VERIFY_MARKERS):
             return None
 
-        line_number, excerpt = self._first_matching_line(text, PROVIDER_MARKERS[provider])
+        line_number, excerpt = self._verification_evidence(text, PROVIDER_MARKERS[provider])
         return WebhookFinding(
             kind="missing_signature_verification",
             severity="medium",
@@ -272,6 +274,11 @@ class WebhookAgent(BaseAgent):
         lower_text: str,
         text: str,
     ) -> WebhookFinding | None:
+        provider = self._provider_for_file(relative_path, lower_text)
+        if provider is None:
+            return None
+        if not any(marker in lower_text for marker in PROVIDER_VERIFY_MARKERS[provider]):
+            return None
         if not any(marker in lower_text for marker in ROUTE_MARKERS):
             return None
         if not any(hint in lower_text for hint in WEBHOOK_HINTS):
@@ -305,8 +312,17 @@ class WebhookAgent(BaseAgent):
         for line_number, raw_line in enumerate(text.splitlines(), start=1):
             lower_line = raw_line.lower()
             if any(token in lower_line for token in tokens):
-                return line_number, trim_output(raw_line, limit=180)
+                return line_number, trim_output(raw_line, limit=160)
         return None, ""
+
+    def _verification_evidence(self, text: str, tokens: tuple[str, ...]) -> tuple[int | None, str]:
+        route_line = self._first_matching_line(text, ROUTE_MARKERS)
+        provider_line = self._first_matching_line(text, tokens)
+        if provider_line[0] is None:
+            return route_line
+        if route_line[0] is None or route_line[0] == provider_line[0]:
+            return provider_line
+        return route_line[0], f"{route_line[1]} | {provider_line[1]}"
 
     def _build_summary(self, report: WebhookReport) -> str:
         if report.scanned_files == 0:

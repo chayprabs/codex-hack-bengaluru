@@ -2,7 +2,19 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Callable
 
-from ..models import AgentState, AgentStatus, Audit, AuditState, CoverageBand, Finding, FindingSeverity
+from ..models import (
+    AgentState,
+    AgentStatus,
+    Audit,
+    AuditState,
+    CoverageBand,
+    Finding,
+    FindingConfidence,
+    FindingProofType,
+    FindingSeverity,
+    FindingVerificationState,
+)
+from .replay_vault import replay_vault_service
 
 
 @dataclass(frozen=True, slots=True)
@@ -10,8 +22,19 @@ class SimulatedFindingSpec:
     severity: FindingSeverity
     title: str
     summary: str
+    technical_summary: str | None = None
     file_path: str | None = None
     line: int | None = None
+    agent_name: str | None = None
+    check_name: str | None = None
+    impact_summary: str | None = None
+    files: tuple[str, ...] = ()
+    line_hints: tuple[str, ...] = ()
+    evidence_snippet: str | None = None
+    confidence: FindingConfidence = "high"
+    proof_type: FindingProofType = "deterministic_pattern"
+    suggested_patch: str | None = None
+    verification_state: FindingVerificationState = "unverified"
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,6 +47,8 @@ class ScoreUpdateSpec:
     supported_areas: tuple[str, ...] | None = None
     partially_supported_areas: tuple[str, ...] | None = None
     unsupported_areas: tuple[str, ...] | None = None
+    needs_manual_review_areas: tuple[str, ...] | None = None
+    unsupported_technologies: tuple[str, ...] | None = None
     scanned_files_count: int | None = None
     skipped_files_count: int | None = None
     frameworks_detected: tuple[str, ...] | None = None
@@ -92,9 +117,17 @@ def apply_lifecycle_step(
             Finding(
                 severity=step.finding.severity,
                 title=step.finding.title,
-                summary=step.finding.summary,
-                file_path=step.finding.file_path,
-                line=step.finding.line,
+                agent_name=step.finding.agent_name,
+                check_name=step.finding.check_name,
+                files=list(step.finding.files or ([step.finding.file_path] if step.finding.file_path else [])),
+                line_hints=list(step.finding.line_hints or ([str(step.finding.line)] if step.finding.line else [])),
+                impact_summary=step.finding.impact_summary or "",
+                technical_summary=step.finding.technical_summary or step.finding.summary,
+                evidence_snippet=step.finding.evidence_snippet,
+                confidence=step.finding.confidence,
+                proof_type=step.finding.proof_type,
+                suggested_patch=step.finding.suggested_patch,
+                verification_state=step.finding.verification_state,
                 created_at=occurred_at,
             ),
         ]
@@ -121,6 +154,10 @@ def apply_lifecycle_step(
             updated.partially_supported_areas = list(step.score_update.partially_supported_areas)
         if step.score_update.unsupported_areas is not None:
             updated.unsupported_areas = list(step.score_update.unsupported_areas)
+        if step.score_update.needs_manual_review_areas is not None:
+            updated.needs_manual_review_areas = list(step.score_update.needs_manual_review_areas)
+        if step.score_update.unsupported_technologies is not None:
+            updated.unsupported_technologies = list(step.score_update.unsupported_technologies)
         if step.score_update.scanned_files_count is not None:
             updated.scanned_files_count = step.score_update.scanned_files_count
         if step.score_update.skipped_files_count is not None:
@@ -134,6 +171,11 @@ def apply_lifecycle_step(
 
     if step.completion_message is not None:
         updated.completion_message = step.completion_message
+    if step.audit_status == "completed":
+        updated.findings = [_completed_finding(finding) for finding in updated.findings]
+        updated.replay_records = replay_vault_service.build_records(updated.id, updated.findings)
+    elif step.audit_status == "failed":
+        updated.replay_records = replay_vault_service.build_records(updated.id, updated.findings)
 
     return updated
 
@@ -167,7 +209,7 @@ def build_default_simulation_steps(_: Audit) -> list[AuditLifecycleStep]:
             score_update=ScoreUpdateSpec(
                 score=96,
                 coverage=24,
-                reason="Repository intake completed and the initial risk baseline was set.",
+                reason="Coverage improved because repo intake mapped the first supported surfaces.",
             ),
         ),
         AuditLifecycleStep(
@@ -192,13 +234,17 @@ def build_default_simulation_steps(_: Audit) -> list[AuditLifecycleStep]:
                     "scan. Replace this with a real transport-security finding once agents "
                     "are integrated."
                 ),
+                agent_name="scanner",
+                check_name="cors_policy_review",
                 file_path="app/main.py",
                 line=14,
+                evidence_snippet="allow_origins=['*'] was observed on the application surface.",
+                suggested_patch="Restrict allowed origins to trusted domains and keep credentials disabled for wildcard policies.",
             ),
             score_update=ScoreUpdateSpec(
                 score=84,
                 coverage=46,
-                reason="The initial scan introduced a medium-risk transport finding.",
+                reason="Score dropped because a broad CORS policy widened browser exposure.",
             ),
         ),
         AuditLifecycleStep(
@@ -211,13 +257,17 @@ def build_default_simulation_steps(_: Audit) -> list[AuditLifecycleStep]:
                     "This placeholder finding keeps the lifecycle realistic until the real "
                     "scanner is wired in."
                 ),
+                agent_name="scanner",
+                check_name="health_metadata_review",
                 file_path="app/api/routes/health.py",
                 line=11,
+                evidence_snippet="Health metadata exposed environment-adjacent details in the response body.",
+                suggested_patch="Limit the health payload to readiness signals and remove environment-derived metadata from public responses.",
             ),
             score_update=ScoreUpdateSpec(
                 score=78,
                 coverage=58,
-                reason="A second low-risk signal lowered the running trust score slightly.",
+                reason="Score dropped because the health surface still exposed unnecessary metadata.",
             ),
         ),
         AuditLifecycleStep(
@@ -237,7 +287,7 @@ def build_default_simulation_steps(_: Audit) -> list[AuditLifecycleStep]:
             score_update=ScoreUpdateSpec(
                 score=74,
                 coverage=86,
-                reason="Verification confirmed the simulated findings and finalized the score.",
+                reason="Score stayed lower because verifier closeout kept both findings in scope.",
             ),
         ),
         AuditLifecycleStep(
@@ -259,6 +309,12 @@ def _upsert_agent(agents: list[AgentStatus], next_agent: AgentStatus) -> list[Ag
     else:
         updated_agents.append(next_agent)
     return updated_agents
+
+
+def _completed_finding(finding: Finding) -> Finding:
+    if finding.verification_state == "in_review":
+        return finding.model_copy(update={"verification_state": "unverified"})
+    return finding
 
 
 AuditSimulationPlanBuilder = Callable[[Audit], list[AuditLifecycleStep]]

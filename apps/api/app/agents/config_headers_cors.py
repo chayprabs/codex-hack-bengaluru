@@ -95,7 +95,7 @@ class ConfigHeadersCorsAgent(BaseAgent):
     description = "Looks for wildcard CORS, reflective origins, and missing or disabled security headers."
     repo_map_inputs = ("config", "middleware", "env", "routes")
 
-    def __init__(self, *, max_files: int = 60, max_findings: int = 20) -> None:
+    def __init__(self, *, max_files: int = 60, max_findings: int = 16) -> None:
         self.max_files = max_files
         self.max_findings = max_findings
 
@@ -181,7 +181,7 @@ class ConfigHeadersCorsAgent(BaseAgent):
         findings: list[ConfigHeadersCorsFinding] = []
         saw_header_hardening = False
         saw_route_surface = False
-        first_context_file: str | None = None
+        header_review_anchor: str | None = None
 
         for relative_path, file_path in files:
             if should_skip_analysis_path(relative_path):
@@ -192,7 +192,8 @@ class ConfigHeadersCorsAgent(BaseAgent):
             lower_text = text.lower()
             saw_header_hardening = saw_header_hardening or any(marker in lower_text for marker in SECURITY_HEADER_MARKERS)
             saw_route_surface = saw_route_surface or any(marker in lower_text for marker in ROUTE_MARKERS)
-            first_context_file = first_context_file or relative_path
+            if header_review_anchor is None and self._is_header_review_anchor(relative_path, lower_text):
+                header_review_anchor = relative_path
             findings.extend(self._scan_file(relative_path, text))
             if len(findings) >= self.max_findings:
                 findings = findings[: self.max_findings]
@@ -203,7 +204,7 @@ class ConfigHeadersCorsAgent(BaseAgent):
             and files
             and saw_route_surface
             and not saw_header_hardening
-            and first_context_file is not None
+            and header_review_anchor is not None
         ):
             findings.append(
                 ConfigHeadersCorsFinding(
@@ -214,7 +215,7 @@ class ConfigHeadersCorsAgent(BaseAgent):
                     description=(
                         "Static inspection found route or app setup code, but did not find clear CSP, frame, content-type, or strict-transport-security markers."
                     ),
-                    file_path=first_context_file,
+                    file_path=header_review_anchor,
                     evidence_excerpt="No obvious security-header middleware or config marker was found in the scoped files.",
                     suggested_remediation=(
                         "Review runtime header policy and add explicit CSP, frame, content-type, and transport protections where the framework supports them."
@@ -239,9 +240,14 @@ class ConfigHeadersCorsAgent(BaseAgent):
             return []
 
         findings: list[ConfigHeadersCorsFinding] = []
+        saw_wildcard_cors = False
+        saw_reflective_cors = False
+        saw_debug_flag = False
+        disabled_headers: list[tuple[int, str]] = []
         lines = text.splitlines()
         for line_number, raw_line in enumerate(lines, start=1):
-            if WILDCARD_CORS_RE.search(raw_line) and self._nearby_credentials_enabled(lines, line_number):
+            if not saw_wildcard_cors and WILDCARD_CORS_RE.search(raw_line) and self._nearby_credentials_enabled(lines, line_number):
+                saw_wildcard_cors = True
                 findings.append(
                     ConfigHeadersCorsFinding(
                         kind="wildcard_cors_with_credentials",
@@ -251,11 +257,12 @@ class ConfigHeadersCorsAgent(BaseAgent):
                         description="This config appears to allow all origins while also allowing credentials, which browsers reject or developers accidentally work around insecurely.",
                         file_path=relative_path,
                         line_start=line_number,
-                        evidence_excerpt=trim_output(raw_line, limit=180),
+                        evidence_excerpt=trim_output(raw_line, limit=160),
                         suggested_remediation="Restrict origins to an explicit allowlist and never pair credentials with a wildcard origin.",
                     )
                 )
-            elif REFLECTIVE_ORIGIN_RE.search(raw_line):
+            elif not saw_reflective_cors and REFLECTIVE_ORIGIN_RE.search(raw_line):
+                saw_reflective_cors = True
                 findings.append(
                     ConfigHeadersCorsFinding(
                         kind="reflective_cors_origin",
@@ -265,11 +272,12 @@ class ConfigHeadersCorsAgent(BaseAgent):
                         description="This file appears to reflect request origins or uses a broad origin regex instead of an explicit allowlist.",
                         file_path=relative_path,
                         line_start=line_number,
-                        evidence_excerpt=trim_output(raw_line, limit=180),
+                        evidence_excerpt=trim_output(raw_line, limit=160),
                         suggested_remediation="Replace reflective or wildcard-friendly origin logic with a narrow allowlist of trusted origins.",
                     )
                 )
-            elif self._looks_like_prod_debug_flag(relative_path, raw_line):
+            elif not saw_debug_flag and self._looks_like_prod_debug_flag(relative_path, raw_line):
+                saw_debug_flag = True
                 findings.append(
                     ConfigHeadersCorsFinding(
                         kind="debug_enabled_in_production_config",
@@ -279,27 +287,30 @@ class ConfigHeadersCorsAgent(BaseAgent):
                         description="This config appears runtime-facing and enables a debug flag or development environment setting that should not ship to production.",
                         file_path=relative_path,
                         line_start=line_number,
-                        evidence_excerpt=trim_output(raw_line, limit=180),
+                        evidence_excerpt=trim_output(raw_line, limit=160),
                         suggested_remediation="Disable debug or development mode in production-bound config and keep any dev-only flags in explicitly local files.",
                     )
                 )
             elif SECURITY_HEADERS_DISABLED_RE.search(raw_line):
-                findings.append(
-                    ConfigHeadersCorsFinding(
-                        kind="security_headers_disabled",
-                        severity="medium",
-                        confidence="high",
-                        title="Security header protection is explicitly disabled",
-                        description="This config turns off a built-in browser hardening header or middleware setting.",
-                        file_path=relative_path,
-                        line_start=line_number,
-                        evidence_excerpt=trim_output(raw_line, limit=180),
-                        suggested_remediation="Re-enable the disabled header unless there is a documented exception and compensating control.",
-                    )
-                )
+                disabled_headers.append((line_number, trim_output(raw_line, limit=160)))
 
             if len(findings) >= self.max_findings:
                 break
+
+        if disabled_headers and len(findings) < self.max_findings:
+            findings.append(
+                ConfigHeadersCorsFinding(
+                    kind="security_headers_disabled",
+                    severity="medium",
+                    confidence="high",
+                    title="Security header protection is explicitly disabled",
+                    description="This config turns off one or more built-in browser hardening headers or middleware settings.",
+                    file_path=relative_path,
+                    line_start=disabled_headers[0][0],
+                    evidence_excerpt=" | ".join(excerpt for _, excerpt in disabled_headers[:2]),
+                    suggested_remediation="Re-enable the disabled header unless there is a documented exception and compensating control.",
+                )
+            )
 
         return findings
 
@@ -315,6 +326,12 @@ class ConfigHeadersCorsAgent(BaseAgent):
         if not (DEBUG_TRUE_RE.search(raw_line) or DEV_ENV_RE.search(raw_line)):
             return False
         return any(token in lower_path for token in RUNTIME_CONFIG_PATH_HINTS)
+
+    def _is_header_review_anchor(self, relative_path: str, lower_text: str) -> bool:
+        lower_path = relative_path.lower()
+        if any(token in lower_path for token in ("middleware", "main.", "app.", "server.", "settings", "config")):
+            return True
+        return any(marker in lower_text for marker in ("fastapi(", "express()", "createapp(", "app = fastapi(", "app = flask("))
 
     def _patch_strategy(self, kind: ConfigHeadersCorsFindingKind) -> str:
         if kind == "missing_security_headers_review":

@@ -59,6 +59,16 @@ body {
   }
 }
 
+@keyframes traceOverlayEnter {
+  0% {
+    opacity: 0;
+  }
+
+  100% {
+    opacity: 1;
+  }
+}
+
 .story-pulse {
   animation: storyPulse 1.8s ease-in-out infinite;
 }
@@ -69,4 +79,8 @@ body {
 
 .trace-panel-enter {
   animation: tracePanelEnter 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.trace-overlay-enter {
+  animation: traceOverlayEnter 180ms ease-out;
 }

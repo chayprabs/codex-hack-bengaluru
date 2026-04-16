@@ -18,7 +18,7 @@ export default function Loading() {
     <PageShell
       actions={
         <Link href="/" className={pageActionClassName}>
-          Back to auditing
+          Back to audits
         </Link>
       }
     >
@@ -49,7 +49,7 @@ export default function Loading() {
       <WallTable
         isLoading
         title="Ranked findings"
-        description="Loading severity-derived trust scores and audit links."
+        description="Loading ranked findings and scores."
       />
     </PageShell>
   );

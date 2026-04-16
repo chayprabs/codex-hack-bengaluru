@@ -5,7 +5,8 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 API_DIR = Path(__file__).resolve().parents[2]
-ROOT_DIR = API_DIR.parents[1]
+ROOT_DIR = API_DIR.parents[1] if len(API_DIR.parents) > 1 else API_DIR
+DEFAULT_DATABASE_URL = "sqlite:///./trustlayer.db"
 
 
 class Settings(BaseSettings):
@@ -14,8 +15,8 @@ class Settings(BaseSettings):
     api_prefix: str = "/api"
     openai_api_key: str = ""
     github_token: str = ""
-    database_url: str = "sqlite:///./trustlayer.db"
-    demo_repo_url: str = "https://github.com/example/demo-repo"
+    database_url: str = DEFAULT_DATABASE_URL
+    demo_repo_url: str = "https://github.com/trustlayer-demo/acme-subscriptions-platform"
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
     audit_execution_backend: Literal["auto", "local", "docker"] = "auto"
 

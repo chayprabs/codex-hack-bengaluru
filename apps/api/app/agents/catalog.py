@@ -172,6 +172,36 @@ SPECIALIST_ROSTER: list[SpecialistDefinition] = [
         ),
     ),
     SpecialistDefinition(
+        agent_name="ai_guardrails",
+        display_name="AI Rules / Guardrails Agent",
+        inputs_from_repo_mapper=["ai_rules"],
+        files_of_interest=[
+            ".cursorrules",
+            ".cursor/rules/*",
+            "CLAUDE.md",
+            "AGENTS.md",
+            "copilot instruction or config files",
+            "prompt and instruction files used by coding agents",
+        ],
+        checks=[
+            SpecialistCheckDefinition(id="dangerous_codegen_guidance", summary="Detect AI-tool guidance that appears to encourage risky generated-code patterns."),
+            SpecialistCheckDefinition(id="security_bypass_guidance", summary="Detect instructions that appear to encourage bypassing auth, validation, or other security controls."),
+            SpecialistCheckDefinition(id="secret_literal_in_ai_rules", summary="Detect secret-like literals committed directly inside AI rule files."),
+            SpecialistCheckDefinition(id="secret_handling_guidance", summary="Detect AI-tool instructions that appear to encourage unsafe secret or token handling."),
+            SpecialistCheckDefinition(id="hidden_instruction_pattern", summary="Detect hidden or non-transparent prompt patterns in AI rule files."),
+            SpecialistCheckDefinition(id="risky_guardrail_wording", summary="Detect unclear or overly aggressive codegen guardrail wording."),
+        ],
+        evidence_returns=[
+            "Exact instruction excerpt",
+            "File path and line number",
+            "Governance-oriented wording that avoids overclaim unless a secret literal is present",
+        ],
+        patch_suggestion_shape=PatchSuggestionShape(
+            strategy_examples=["tighten_config", "replace_literal", "manual_review"],
+            fields=PATCH_SUGGESTION_FIELDS,
+        ),
+    ),
+    SpecialistDefinition(
         agent_name="config_headers_cors",
         display_name="Config / Headers / CORS Agent",
         inputs_from_repo_mapper=["config", "middleware", "env", "routes"],

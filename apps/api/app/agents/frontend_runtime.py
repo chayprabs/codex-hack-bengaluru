@@ -54,6 +54,7 @@ HARDCODED_CLIENT_TOKEN_RE = re.compile(
 )
 SAFE_PUBLIC_TOKENS = ("anon_key", "anonymous", "public_key")
 PLACEHOLDER_MARKERS = ("example", "sample", "placeholder", "changeme", "<redacted>", "<token>", "dummy")
+ENV_TEMPLATE_MARKERS = ("example", "sample", "template", "dist")
 
 
 class FrontendRuntimeAgentError(ValueError):
@@ -86,7 +87,7 @@ class FrontendRuntimeAgent(BaseAgent):
     description = "Looks for public secret exposure, risky browser token handling, and direct HTML sinks."
     repo_map_inputs = ("frontend", "config", "auth", "env", "manifests")
 
-    def __init__(self, *, max_files: int = 80, max_findings: int = 24) -> None:
+    def __init__(self, *, max_files: int = 80, max_findings: int = 18) -> None:
         self.max_files = max_files
         self.max_findings = max_findings
 
@@ -195,6 +196,10 @@ class FrontendRuntimeAgent(BaseAgent):
         return findings[: self.max_findings]
 
     def _public_env_findings(self, relative_path: str, text: str) -> list[FrontendRuntimeFinding]:
+        lower_path = relative_path.lower()
+        if relative_path.startswith(".env") and any(marker in lower_path for marker in ENV_TEMPLATE_MARKERS):
+            return []
+
         findings: list[FrontendRuntimeFinding] = []
         for line_number, raw_line in enumerate(text.splitlines(), start=1):
             match = PUBLIC_ENV_RE.search(raw_line)
@@ -204,18 +209,18 @@ class FrontendRuntimeAgent(BaseAgent):
             if any(marker in token.lower() for marker in SAFE_PUBLIC_TOKENS):
                 continue
             kind: FrontendRuntimeFindingKind = "service_role_in_frontend" if SERVICE_ROLE_RE.search(token) else "public_secret_exposure"
-            severity: FindingSeverity = "critical" if kind == "service_role_in_frontend" else "high"
+            severity: FindingSeverity = "critical" if kind == "service_role_in_frontend" else "medium"
             title = "Frontend references a service-role secret" if kind == "service_role_in_frontend" else "Frontend exposes a public secret-like env name"
             description = (
                 "This frontend file references a service-role style secret, which should never be exposed to browser code."
                 if kind == "service_role_in_frontend"
-                else "This frontend file references a public env variable name that looks secret-bearing."
+                else "This frontend file references a public env variable name that looks secret-bearing. That may be intentional naming, but it is worth review."
             )
             findings.append(
                 FrontendRuntimeFinding(
                     kind=kind,
                     severity=severity,
-                    confidence="high",
+                    confidence="high" if kind == "service_role_in_frontend" else "medium",
                     title=title,
                     description=description,
                     file_path=relative_path,
@@ -229,7 +234,7 @@ class FrontendRuntimeAgent(BaseAgent):
         return findings
 
     def _hardcoded_token_findings(self, relative_path: str, text: str) -> list[FrontendRuntimeFinding]:
-        findings: list[FrontendRuntimeFinding] = []
+        matches: list[tuple[int, str]] = []
         for line_number, raw_line in enumerate(text.splitlines(), start=1):
             if not HARDCODED_CLIENT_TOKEN_RE.search(raw_line):
                 continue
@@ -238,20 +243,29 @@ class FrontendRuntimeAgent(BaseAgent):
                 continue
             if any(marker in lower_line for marker in PLACEHOLDER_MARKERS):
                 continue
-            findings.append(
-                FrontendRuntimeFinding(
-                    kind="hardcoded_client_token",
-                    severity="high",
-                    confidence="high",
-                    title="Frontend file contains hardcoded auth material",
-                    description="This browser-facing file appears to embed a token, API key, or bearer value directly in source.",
-                    file_path=relative_path,
-                    line_start=line_number,
-                    evidence_excerpt=self._redacted_line(raw_line),
-                    suggested_remediation="Move the secret or token flow to the server and expose only short-lived or non-sensitive public values to the client.",
-                )
+            matches.append((line_number, self._redacted_line(raw_line)))
+        if not matches:
+            return []
+
+        line_number, excerpt = matches[0]
+        description = "This browser-facing file appears to embed a token, API key, or bearer value directly in source."
+        if len(matches) > 1:
+            description = (
+                f"This browser-facing file appears to embed auth material directly in source on {len(matches)} lines."
             )
-        return findings
+        return [
+            FrontendRuntimeFinding(
+                kind="hardcoded_client_token",
+                severity="high",
+                confidence="high",
+                title="Frontend file contains hardcoded auth material",
+                description=description,
+                file_path=relative_path,
+                line_start=line_number,
+                evidence_excerpt=excerpt,
+                suggested_remediation="Move the secret or token flow to the server and expose only short-lived or non-sensitive public values to the client.",
+            )
+        ]
 
     def _line_matches(
         self,
@@ -260,53 +274,66 @@ class FrontendRuntimeAgent(BaseAgent):
         pattern: re.Pattern[str],
         kind: FrontendRuntimeFindingKind,
     ) -> list[FrontendRuntimeFinding]:
-        findings: list[FrontendRuntimeFinding] = []
+        matches: list[tuple[int, str]] = []
         for line_number, raw_line in enumerate(text.splitlines(), start=1):
             if not pattern.search(raw_line):
                 continue
-            if kind == "token_storage":
-                findings.append(
-                    FrontendRuntimeFinding(
-                        kind=kind,
-                        severity="medium",
-                        confidence="medium",
-                        title="Frontend stores auth material in browser storage",
-                        description="This file appears to store auth-like state in localStorage, sessionStorage, or document.cookie.",
-                        file_path=relative_path,
-                        line_start=line_number,
-                        evidence_excerpt=trim_output(raw_line, limit=180),
-                        suggested_remediation="Prefer HttpOnly cookies or another server-managed session approach for sensitive auth state.",
-                    )
+            matches.append((line_number, trim_output(raw_line, limit=160)))
+        if not matches:
+            return []
+
+        line_number, excerpt = matches[0]
+        match_count = len(matches)
+        if kind == "token_storage":
+            description = "This file appears to store auth-like state in localStorage, sessionStorage, or document.cookie."
+            if match_count > 1:
+                description = f"This file appears to store auth-like state in browser storage on {match_count} lines."
+            return [
+                FrontendRuntimeFinding(
+                    kind=kind,
+                    severity="medium",
+                    confidence="medium",
+                    title="Frontend stores auth material in browser storage",
+                    description=description,
+                    file_path=relative_path,
+                    line_start=line_number,
+                    evidence_excerpt=excerpt,
+                    suggested_remediation="Prefer HttpOnly cookies or another server-managed session approach for sensitive auth state.",
                 )
-            elif kind == "unsafe_html_sink":
-                findings.append(
-                    FrontendRuntimeFinding(
-                        kind=kind,
-                        severity="medium",
-                        confidence="low",
-                        title="Frontend uses a direct HTML injection sink",
-                        description="This file uses `dangerouslySetInnerHTML` or `innerHTML`, which deserves manual XSS review.",
-                        file_path=relative_path,
-                        line_start=line_number,
-                        evidence_excerpt=trim_output(raw_line, limit=180),
-                        suggested_remediation="Review the data source carefully and sanitize or avoid direct HTML injection when possible.",
-                    )
+            ]
+        if kind == "unsafe_html_sink":
+            description = "This file uses `dangerouslySetInnerHTML` or another direct HTML sink, which deserves manual XSS review."
+            if match_count > 1:
+                description = f"This file uses direct HTML injection sinks on {match_count} lines and deserves manual XSS review."
+            return [
+                FrontendRuntimeFinding(
+                    kind=kind,
+                    severity="medium",
+                    confidence="low",
+                    title="Frontend uses a direct HTML injection sink",
+                    description=description,
+                    file_path=relative_path,
+                    line_start=line_number,
+                    evidence_excerpt=excerpt,
+                    suggested_remediation="Review the data source carefully and sanitize or avoid direct HTML injection when possible.",
                 )
-            else:
-                findings.append(
-                    FrontendRuntimeFinding(
-                        kind=kind,
-                        severity="high",
-                        confidence="medium",
-                        title="Frontend uses eval-like runtime execution",
-                        description="This file uses `eval`, `new Function`, or a string-based timer callback, which increases XSS and code-injection risk.",
-                        file_path=relative_path,
-                        line_start=line_number,
-                        evidence_excerpt=trim_output(raw_line, limit=180),
-                        suggested_remediation="Replace eval-like execution with explicit function references or safer data-driven control flow.",
-                    )
-                )
-        return findings
+            ]
+        description = "This file uses `eval`, `new Function`, or a string-based timer callback, which increases XSS and code-injection risk."
+        if match_count > 1:
+            description = f"This file uses eval-like runtime execution on {match_count} lines, which increases XSS and code-injection risk."
+        return [
+            FrontendRuntimeFinding(
+                kind=kind,
+                severity="high",
+                confidence="medium",
+                title="Frontend uses eval-like runtime execution",
+                description=description,
+                file_path=relative_path,
+                line_start=line_number,
+                evidence_excerpt=excerpt,
+                suggested_remediation="Replace eval-like execution with explicit function references or safer data-driven control flow.",
+            )
+        ]
 
     def _redacted_line(self, raw_line: str) -> str:
         separator = "=" if "=" in raw_line else ":" if ":" in raw_line else ""

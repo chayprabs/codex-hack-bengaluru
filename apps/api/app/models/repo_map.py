@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from .common import StrictModel
 
 RepoMapCategory = Literal["runtime", "framework", "database", "tooling", "platform"]
 RepoMapConfidence = Literal["low", "medium", "high"]
+RepoMapSupportLabel = Literal["supported", "partially_supported", "unsupported", "needs_manual_review"]
 
 
 class RepoMapFile(StrictModel):
@@ -23,6 +24,14 @@ class RepoMapFolder(StrictModel):
 class RepoMapZone(StrictModel):
     path: str
     reason: str
+
+
+class RepoMapTechnology(StrictModel):
+    slug: str
+    name: str
+    support: RepoMapSupportLabel = "unsupported"
+    reason: str
+    evidence: list[str] = Field(default_factory=list)
 
 
 class RepoMapPackageManager(StrictModel):
@@ -77,5 +86,24 @@ class RepoMap(StrictModel):
     package_managers: list[RepoMapPackageManager] = Field(default_factory=list)
     key_files: RepoMapKeyFiles = Field(default_factory=RepoMapKeyFiles)
     likely_entry_points: list[RepoMapFile] = Field(default_factory=list)
+    unsupported_technologies: list[RepoMapTechnology] = Field(default_factory=list)
+    needs_manual_review_zones: list[RepoMapZone] = Field(default_factory=list)
     unsupported_zones: list[RepoMapZone] = Field(default_factory=list)
     scan: RepoMapScan = Field(default_factory=RepoMapScan)
+
+    @model_validator(mode="before")
+    @classmethod
+    def sync_zone_fields(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+
+        payload = dict(value)
+        unsupported_zones = payload.get("unsupported_zones")
+        manual_review_zones = payload.get("needs_manual_review_zones")
+
+        if manual_review_zones is None and unsupported_zones is not None:
+            payload["needs_manual_review_zones"] = unsupported_zones
+        if unsupported_zones is None and manual_review_zones is not None:
+            payload["unsupported_zones"] = manual_review_zones
+
+        return payload
