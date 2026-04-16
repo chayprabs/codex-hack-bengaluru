@@ -1,1 +1,1 @@
-"""Route modules for the TrustLayer API."""
+"""Compatibility route modules for the TrustLayer backend."""

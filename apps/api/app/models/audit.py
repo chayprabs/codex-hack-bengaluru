@@ -1,20 +1,22 @@
-from datetime import datetime, timezone
+from datetime import datetime
+from urllib.parse import urlparse
 from typing import Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-
-def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
-
+from .common import utc_now
 
 AuditState = Literal["queued", "running", "completed", "failed"]
 AgentState = Literal["queued", "running", "completed", "failed"]
 FindingSeverity = Literal["low", "medium", "high", "critical"]
 
 
-class Finding(BaseModel):
+class StrictModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class Finding(StrictModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     severity: FindingSeverity = "low"
     title: str
@@ -24,14 +26,14 @@ class Finding(BaseModel):
     created_at: datetime = Field(default_factory=utc_now)
 
 
-class AgentStatus(BaseModel):
+class AgentStatus(StrictModel):
     name: str
     status: AgentState = "queued"
     message: str = "Waiting to start."
     updated_at: datetime = Field(default_factory=utc_now)
 
 
-class Audit(BaseModel):
+class Audit(StrictModel):
     id: str
     repo_url: str
     status: AuditState = "queued"
@@ -41,11 +43,24 @@ class Audit(BaseModel):
     findings: list[Finding] = Field(default_factory=list)
 
 
-class CreateAuditRequest(BaseModel):
+class CreateAuditRequest(StrictModel):
     repo_url: str
 
+    @field_validator("repo_url")
+    @classmethod
+    def validate_repo_url(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("repo_url is required.")
 
-class WallEntry(BaseModel):
+        parsed = urlparse(normalized)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("repo_url must be a valid http or https URL.")
+
+        return normalized
+
+
+class WallEntry(StrictModel):
     audit_id: str
     repo_url: str
     title: str

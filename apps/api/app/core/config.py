@@ -9,6 +9,7 @@ ROOT_DIR = API_DIR.parents[1]
 
 class Settings(BaseSettings):
     app_name: str = "TrustLayer API"
+    service_slug: str = "trustlayer-api"
     api_prefix: str = "/api"
     openai_api_key: str = ""
     github_token: str = ""

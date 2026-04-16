@@ -1,6 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useState, useTransition } from "react";
+
+import { apiClient, getApiErrorMessage } from "@/lib/api";
+import { cn, isGithubRepoUrl } from "@/lib/utils";
 
 const DEMO_REPO_URL = "https://github.com/vercel/next.js";
 
@@ -12,45 +17,81 @@ const stats = [
 ];
 
 export function HomePage() {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
   const [repoUrl, setRepoUrl] = useState("");
-  const [feedback, setFeedback] = useState("Paste a GitHub repo URL to stage a placeholder audit flow.");
+  const [pendingAction, setPendingAction] = useState<"audit" | "demo" | null>(null);
+  const [feedback, setFeedback] = useState<{
+    tone: "neutral" | "success" | "error";
+    message: string;
+  }>({
+    tone: "neutral",
+    message: "Paste a GitHub repo URL to launch an audit room backed by the current API scaffold.",
+  });
 
   const trimmedUrl = repoUrl.trim();
+  const isValidRepoUrl = isGithubRepoUrl(trimmedUrl);
+  const isWorking = pendingAction !== null || isPending;
 
-  const isValidRepoUrl = useMemo(() => {
+  async function handleAuditClick() {
     if (!trimmedUrl) {
-      return false;
-    }
-
-    try {
-      const url = new URL(trimmedUrl);
-      return (
-        (url.protocol === "http:" || url.protocol === "https:") &&
-        url.hostname.includes("github.com") &&
-        url.pathname.split("/").filter(Boolean).length >= 2
-      );
-    } catch {
-      return false;
-    }
-  }, [trimmedUrl]);
-
-  function handleAuditClick() {
-    if (!trimmedUrl) {
-      setFeedback("Add a GitHub repository URL first. The real audit pipeline will hook in next.");
+      setFeedback({
+        tone: "error",
+        message: "Add a GitHub repository URL first so TrustLayer knows what to audit.",
+      });
       return;
     }
 
     if (!isValidRepoUrl) {
-      setFeedback("That does not look like a GitHub repo URL yet. Try something like https://github.com/org/repo.");
+      setFeedback({
+        tone: "error",
+        message: "That does not look like a GitHub repo URL yet. Try something like https://github.com/org/repo.",
+      });
       return;
     }
 
-    setFeedback(`Placeholder action: TrustLayer is queued to audit ${trimmedUrl}. Backend wiring comes next.`);
+    setPendingAction("audit");
+
+    try {
+      const audit = await apiClient.createAudit(trimmedUrl);
+      setFeedback({
+        tone: "success",
+        message: `Audit created for ${trimmedUrl}. Opening audit room ${audit.id.slice(0, 8)} now.`,
+      });
+
+      startTransition(() => {
+        router.push(`/audit/${audit.id}`);
+      });
+    } catch (error) {
+      setFeedback({
+        tone: "error",
+        message: getApiErrorMessage(error),
+      });
+      setPendingAction(null);
+    }
   }
 
-  function handleDemoClick() {
+  async function handleDemoClick() {
     setRepoUrl(DEMO_REPO_URL);
-    setFeedback("Demo mode primed. The sample repo has been filled in so the flow is ready for backend wiring.");
+    setPendingAction("demo");
+
+    try {
+      const audit = await apiClient.createDemoAudit();
+      setFeedback({
+        tone: "success",
+        message: "Demo audit created. Opening the seeded audit room now.",
+      });
+
+      startTransition(() => {
+        router.push(`/audit/${audit.id}`);
+      });
+    } catch (error) {
+      setFeedback({
+        tone: "error",
+        message: getApiErrorMessage(error),
+      });
+      setPendingAction(null);
+    }
   }
 
   return (
@@ -65,8 +106,16 @@ export function HomePage() {
             <span className="inline-block h-2.5 w-2.5 rounded-full bg-signal shadow-[0_0_0_6px_rgba(94,234,212,0.14)]" />
             TrustLayer
           </div>
-          <div className="hidden rounded-full border border-slate-200/80 bg-white/70 px-4 py-2 text-sm text-slate-500 shadow-sm backdrop-blur md:block">
-            Repo audits for fast-moving teams
+          <div className="hidden items-center gap-3 md:flex">
+            <Link
+              href="/wall"
+              className="rounded-full border border-slate-200/80 bg-white/70 px-4 py-2 text-sm text-slate-700 shadow-sm backdrop-blur transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white"
+            >
+              Shame wall
+            </Link>
+            <div className="rounded-full border border-slate-200/80 bg-white/70 px-4 py-2 text-sm text-slate-500 shadow-sm backdrop-blur">
+              Repo audits for fast-moving teams
+            </div>
           </div>
         </header>
 
@@ -98,6 +147,7 @@ export function HomePage() {
                   inputMode="url"
                   placeholder="https://github.com/your-org/your-repo"
                   value={repoUrl}
+                  disabled={isWorking}
                   onChange={(event) => setRepoUrl(event.target.value)}
                   className="min-h-14 flex-1 rounded-2xl border border-slate-200 bg-slate-50 px-5 text-base text-slate-900 outline-none transition focus:border-slate-400 focus:bg-white focus:ring-4 focus:ring-signal/20"
                 />
@@ -106,22 +156,31 @@ export function HomePage() {
                   <button
                     type="button"
                     onClick={handleAuditClick}
-                    className="min-h-14 flex-1 rounded-2xl bg-ink px-6 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-900 focus:outline-none focus:ring-4 focus:ring-slate-300 md:flex-none"
+                    disabled={isWorking}
+                    className="min-h-14 flex-1 rounded-2xl bg-ink px-6 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-900 focus:outline-none focus:ring-4 focus:ring-slate-300 disabled:cursor-not-allowed disabled:opacity-60 md:flex-none"
                   >
-                    Audit this repo
+                    {pendingAction === "audit" ? "Launching audit room..." : "Audit this repo"}
                   </button>
                   <button
                     type="button"
                     onClick={handleDemoClick}
-                    className="min-h-14 flex-1 rounded-2xl border border-slate-200 bg-white px-6 text-sm font-semibold text-slate-800 transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-4 focus:ring-slate-200 md:flex-none"
+                    disabled={isWorking}
+                    className="min-h-14 flex-1 rounded-2xl border border-slate-200 bg-white px-6 text-sm font-semibold text-slate-800 transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-4 focus:ring-slate-200 disabled:cursor-not-allowed disabled:opacity-60 md:flex-none"
                   >
-                    Try demo app
+                    {pendingAction === "demo" ? "Opening demo..." : "Try demo app"}
                   </button>
                 </div>
               </div>
 
-              <div className="mt-4 rounded-2xl border border-slate-200/80 bg-slate-50/80 px-4 py-3 text-sm leading-6 text-slate-600">
-                {feedback}
+              <div
+                className={cn(
+                  "mt-4 rounded-2xl border px-4 py-3 text-sm leading-6",
+                  feedback.tone === "error" && "border-rose-200 bg-rose-50/90 text-rose-700",
+                  feedback.tone === "success" && "border-emerald-200 bg-emerald-50/90 text-emerald-700",
+                  feedback.tone === "neutral" && "border-slate-200/80 bg-slate-50/80 text-slate-600",
+                )}
+              >
+                {feedback.message}
               </div>
             </div>
           </div>
@@ -133,16 +192,14 @@ export function HomePage() {
                   <p className="text-sm font-semibold uppercase tracking-[0.24em] text-slate-500">Preview lane</p>
                   <h2 className="mt-2 text-2xl font-semibold text-slate-900">Audit room snapshot</h2>
                 </div>
-                <span className="rounded-full bg-signal/15 px-3 py-1 text-xs font-semibold text-slate-700">
-                  Placeholder UI
-                </span>
+                <span className="rounded-full bg-signal/15 px-3 py-1 text-xs font-semibold text-slate-700">Frontend wired</span>
               </div>
 
               <div className="space-y-4">
                 {[
-                  ["Planner", "Mapping audit scope and repository entry points."],
-                  ["Scanner", "Preparing static and semantic checks."],
-                  ["Verifier", "Holding space for proof and repro notes."],
+                  ["Planner", "Maps audit scope and repo entry points from the live API snapshot."],
+                  ["Scanner", "Shows current status now and can switch to SSE updates later."],
+                  ["Verifier", "Surfaces findings and routes the team toward the audit room."],
                 ].map(([title, description]) => (
                   <div key={title} className="rounded-2xl border border-slate-200 bg-slate-50/85 p-4">
                     <div className="flex items-center justify-between">
@@ -156,9 +213,11 @@ export function HomePage() {
                 ))}
               </div>
 
-              <div className="mt-5 rounded-2xl bg-ink px-5 py-4 text-sm leading-6 text-slate-200">
-                Findings feed will surface here once the backend stream is wired. For now, the homepage keeps the
-                interaction local and fast.
+              <div className="mt-5 space-y-3 rounded-2xl bg-ink px-5 py-4 text-sm leading-6 text-slate-200">
+                <p>The landing page now creates audits and routes into `/audit/[id]` using the typed frontend client.</p>
+                <Link href="/wall" className="inline-flex font-semibold text-signal transition hover:text-white">
+                  Open the shame wall
+                </Link>
               </div>
             </div>
           </aside>
