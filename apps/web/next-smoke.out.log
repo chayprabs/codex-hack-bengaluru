@@ -14,3 +14,19 @@
  GET / 200 in 56ms
  ✓ Compiled /wall in 354ms (633 modules)
  GET /wall 200 in 592ms
+ ✓ Compiled in 424ms (246 modules)
+ ✓ Compiled in 261ms (246 modules)
+ ✓ Compiled in 263ms (246 modules)
+ ✓ Compiled in 251ms (246 modules)
+ ✓ Compiled in 213ms (246 modules)
+ ✓ Compiled in 414ms (247 modules)
+ ✓ Compiled in 330ms (247 modules)
+ ✓ Compiled in 254ms (247 modules)
+ ✓ Compiled in 436ms (247 modules)
+ ✓ Compiled in 224ms (247 modules)
+ ✓ Compiled in 245ms (247 modules)
+ ✓ Compiled in 307ms (247 modules)
+ ✓ Compiled in 278ms (247 modules)
+ ✓ Compiled in 261ms (247 modules)
+ ✓ Compiled in 329ms (247 modules)
+[?25h

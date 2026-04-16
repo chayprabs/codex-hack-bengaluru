@@ -3,11 +3,17 @@ import {
   DEFAULT_NETWORK_ERROR_MESSAGE,
   DEFAULT_REQUEST_ERROR_MESSAGE,
 } from "@/lib/constants";
+import {
+  buildDemoAuditId,
+  getLocalDemoAudit,
+  getLocalDemoSetup,
+  getLocalWallEntries,
+  isLocalDemoAuditId,
+} from "@/lib/localDemo";
 import type {
   Audit,
   AuditMode,
   CreateAuditRequest,
-  DemoSetupResponse,
   Finding,
   HealthCheckResponse,
   ReplayRecord,
@@ -326,18 +332,30 @@ export function createAudit(repoUrl: string, auditMode: AuditMode = "fast") {
 }
 
 export function createDemoAudit(profileKey?: string) {
-  const path = profileKey ? `/demo-audit?profile_key=${encodeURIComponent(profileKey)}` : "/demo-audit";
+  const localAudit = getLocalDemoAudit(buildDemoAuditId(profileKey));
 
-  return request<Audit>(path, {
-    method: "POST",
-  }).then(normalizeAudit);
+  if (!localAudit) {
+    throw new APIError("Could not load the seeded demo profile.");
+  }
+
+  return Promise.resolve(normalizeAudit(localAudit));
 }
 
 export function getDemoSetup() {
-  return request<DemoSetupResponse>("/demo-setup");
+  return Promise.resolve(getLocalDemoSetup());
 }
 
 export function getAudit(auditId: string) {
+  if (isLocalDemoAuditId(auditId)) {
+    const localAudit = getLocalDemoAudit(auditId);
+
+    if (!localAudit) {
+      throw new APIError(`Audit '${auditId}' was not found.`, { status: 404 });
+    }
+
+    return Promise.resolve(normalizeAudit(localAudit));
+  }
+
   return request<Audit>(`/audits/${encodeURIComponent(auditId)}`).then(normalizeAudit);
 }
 
@@ -346,9 +364,15 @@ export function getAuditStreamUrl(auditId: string) {
 }
 
 export function getWall() {
-  return request<WallEntry[]>("/wall").then((entries) =>
-    Array.isArray(entries) ? entries.map(normalizeWallEntry) : [],
-  );
+  return request<WallEntry[]>("/wall")
+    .then((entries) => (Array.isArray(entries) ? entries.map(normalizeWallEntry) : []))
+    .catch((error) => {
+      if (error instanceof APIError && !error.isNetworkError && (error.status ?? 0) < 500) {
+        throw error;
+      }
+
+      return getLocalWallEntries().map(normalizeWallEntry);
+    });
 }
 
 export const apiClient = {

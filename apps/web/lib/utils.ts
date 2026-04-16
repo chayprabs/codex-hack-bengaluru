@@ -28,7 +28,11 @@ export function isGithubRepoUrl(value: string) {
   }
 }
 
-export function titleCase(value: string) {
+export function titleCase(value: string | null | undefined) {
+  if (!value) {
+    return "";
+  }
+
   return value
     .replace(/[_-]+/g, " ")
     .split(" ")

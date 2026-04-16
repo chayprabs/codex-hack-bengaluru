@@ -1,0 +1,185 @@
+ ⚠ Cross origin request detected from 127.0.0.1 to /_next/* resource. In a future major version of Next.js, you will need to explicitly configure "allowedDevOrigins" in next.config to allow this.
+Read more: https://nextjs.org/docs/app/api-reference/config/next-config-js/allowedDevOrigins
+ ⚠ Fast Refresh had to perform a full reload. Read more: https://nextjs.org/docs/messages/fast-refresh-reload
+ ⨯ [Error: ENOENT: no such file or directory, open 'C:\Users\chait\OneDrive\Documents\codexhack\apps\web\.next\server\next-font-manifest.json'] {
+  errno: -4058,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: 'C:\\Users\\chait\\OneDrive\\Documents\\codexhack\\apps\\web\\.next\\server\\next-font-manifest.json',
+  page: '/'
+}
+ ⨯ [Error: ENOENT: no such file or directory, open 'C:\Users\chait\OneDrive\Documents\codexhack\apps\web\.next\routes-manifest.json'] {
+  errno: -4058,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: 'C:\\Users\\chait\\OneDrive\\Documents\\codexhack\\apps\\web\\.next\\routes-manifest.json'
+}
+[Error: ENOENT: no such file or directory, open 'C:\Users\chait\OneDrive\Documents\codexhack\apps\web\.next\server\next-font-manifest.json'] {
+  errno: -4058,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: 'C:\\Users\\chait\\OneDrive\\Documents\\codexhack\\apps\\web\\.next\\server\\next-font-manifest.json',
+  page: '/'
+}
+ ⨯ [Error: ENOENT: no such file or directory, open 'C:\Users\chait\OneDrive\Documents\codexhack\apps\web\.next\routes-manifest.json'] {
+  errno: -4058,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: 'C:\\Users\\chait\\OneDrive\\Documents\\codexhack\\apps\\web\\.next\\routes-manifest.json'
+}
+[Error: ENOENT: no such file or directory, open 'C:\Users\chait\OneDrive\Documents\codexhack\apps\web\.next\routes-manifest.json'] {
+  errno: -4058,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: 'C:\\Users\\chait\\OneDrive\\Documents\\codexhack\\apps\\web\\.next\\routes-manifest.json'
+}
+ ⨯ Error: Cannot find module './149.js'
+Require stack:
+- C:\Users\chait\OneDrive\Documents\codexhack\apps\web\.next\server\webpack-runtime.js
+- C:\Users\chait\OneDrive\Documents\codexhack\apps\web\.next\server\pages\_document.js
+- C:\Users\chait\OneDrive\Documents\codexhack\apps\web\node_modules\next\dist\server\require.js
+- C:\Users\chait\OneDrive\Documents\codexhack\apps\web\node_modules\next\dist\server\load-components.js
+- C:\Users\chait\OneDrive\Documents\codexhack\apps\web\node_modules\next\dist\build\utils.js
+- C:\Users\chait\OneDrive\Documents\codexhack\apps\web\node_modules\next\dist\build\swc\options.js
+- C:\Users\chait\OneDrive\Documents\codexhack\apps\web\node_modules\next\dist\build\swc\index.js
+- C:\Users\chait\OneDrive\Documents\codexhack\apps\web\node_modules\next\dist\build\next-config-ts\transpile-config.js
+- C:\Users\chait\OneDrive\Documents\codexhack\apps\web\node_modules\next\dist\server\config.js
+- C:\Users\chait\OneDrive\Documents\codexhack\apps\web\node_modules\next\dist\server\next.js
+- C:\Users\chait\OneDrive\Documents\codexhack\apps\web\node_modules\next\dist\server\lib\start-server.js
+    at <unknown> (C:\Users\chait\OneDrive\Documents\codexhack\apps\web\.next\server\app\audit\[id]\page.js:2:10303)
+    at Object.<anonymous> (C:\Users\chait\OneDrive\Documents\codexhack\apps\web\.next\server\app\audit\[id]\page.js:2:10356) {
+  code: 'MODULE_NOT_FOUND',
+  requireStack: [Array],
+  page: '/audit/eb89fe9a-a82c-4631-a623-77508d527025'
+}
+ ⨯ [Error: ENOENT: no such file or directory, open 'C:\Users\chait\OneDrive\Documents\codexhack\apps\web\.next\routes-manifest.json'] {
+  errno: -4058,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: 'C:\\Users\\chait\\OneDrive\\Documents\\codexhack\\apps\\web\\.next\\routes-manifest.json'
+}
+Error: Cannot find module './149.js'
+Require stack:
+- C:\Users\chait\OneDrive\Documents\codexhack\apps\web\.next\server\webpack-runtime.js
+- C:\Users\chait\OneDrive\Documents\codexhack\apps\web\.next\server\pages\_document.js
+- C:\Users\chait\OneDrive\Documents\codexhack\apps\web\node_modules\next\dist\server\require.js
+- C:\Users\chait\OneDrive\Documents\codexhack\apps\web\node_modules\next\dist\server\load-components.js
+- C:\Users\chait\OneDrive\Documents\codexhack\apps\web\node_modules\next\dist\build\utils.js
+- C:\Users\chait\OneDrive\Documents\codexhack\apps\web\node_modules\next\dist\build\swc\options.js
+- C:\Users\chait\OneDrive\Documents\codexhack\apps\web\node_modules\next\dist\build\swc\index.js
+- C:\Users\chait\OneDrive\Documents\codexhack\apps\web\node_modules\next\dist\build\next-config-ts\transpile-config.js
+- C:\Users\chait\OneDrive\Documents\codexhack\apps\web\node_modules\next\dist\server\config.js
+- C:\Users\chait\OneDrive\Documents\codexhack\apps\web\node_modules\next\dist\server\next.js
+- C:\Users\chait\OneDrive\Documents\codexhack\apps\web\node_modules\next\dist\server\lib\start-server.js
+    at <unknown> (C:\Users\chait\OneDrive\Documents\codexhack\apps\web\.next\server\app\audit\[id]\page.js:2:10303)
+    at Object.<anonymous> (C:\Users\chait\OneDrive\Documents\codexhack\apps\web\.next\server\app\audit\[id]\page.js:2:10356) {
+  code: 'MODULE_NOT_FOUND',
+  requireStack: [Array],
+  page: '/audit/eb89fe9a-a82c-4631-a623-77508d527025'
+}
+ ⨯ [Error: ENOENT: no such file or directory, open 'C:\Users\chait\OneDrive\Documents\codexhack\apps\web\.next\routes-manifest.json'] {
+  errno: -4058,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: 'C:\\Users\\chait\\OneDrive\\Documents\\codexhack\\apps\\web\\.next\\routes-manifest.json'
+}
+[Error: ENOENT: no such file or directory, open 'C:\Users\chait\OneDrive\Documents\codexhack\apps\web\.next\routes-manifest.json'] {
+  errno: -4058,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: 'C:\\Users\\chait\\OneDrive\\Documents\\codexhack\\apps\\web\\.next\\routes-manifest.json'
+}
+ ⨯ Error: Cannot find module './149.js'
+Require stack:
+- C:\Users\chait\OneDrive\Documents\codexhack\apps\web\.next\server\webpack-runtime.js
+- C:\Users\chait\OneDrive\Documents\codexhack\apps\web\.next\server\pages\_document.js
+- C:\Users\chait\OneDrive\Documents\codexhack\apps\web\node_modules\next\dist\server\require.js
+- C:\Users\chait\OneDrive\Documents\codexhack\apps\web\node_modules\next\dist\server\load-components.js
+- C:\Users\chait\OneDrive\Documents\codexhack\apps\web\node_modules\next\dist\build\utils.js
+- C:\Users\chait\OneDrive\Documents\codexhack\apps\web\node_modules\next\dist\build\swc\options.js
+- C:\Users\chait\OneDrive\Documents\codexhack\apps\web\node_modules\next\dist\build\swc\index.js
+- C:\Users\chait\OneDrive\Documents\codexhack\apps\web\node_modules\next\dist\build\next-config-ts\transpile-config.js
+- C:\Users\chait\OneDrive\Documents\codexhack\apps\web\node_modules\next\dist\server\config.js
+- C:\Users\chait\OneDrive\Documents\codexhack\apps\web\node_modules\next\dist\server\next.js
+- C:\Users\chait\OneDrive\Documents\codexhack\apps\web\node_modules\next\dist\server\lib\start-server.js
+    at <unknown> (C:\Users\chait\OneDrive\Documents\codexhack\apps\web\.next\server\app\page.js:2:7842)
+    at Object.<anonymous> (C:\Users\chait\OneDrive\Documents\codexhack\apps\web\.next\server\app\page.js:2:7891) {
+  code: 'MODULE_NOT_FOUND',
+  requireStack: [Array],
+  page: '/'
+}
+ ⨯ [Error: ENOENT: no such file or directory, open 'C:\Users\chait\OneDrive\Documents\codexhack\apps\web\.next\routes-manifest.json'] {
+  errno: -4058,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: 'C:\\Users\\chait\\OneDrive\\Documents\\codexhack\\apps\\web\\.next\\routes-manifest.json'
+}
+Error: Cannot find module './149.js'
+Require stack:
+- C:\Users\chait\OneDrive\Documents\codexhack\apps\web\.next\server\webpack-runtime.js
+- C:\Users\chait\OneDrive\Documents\codexhack\apps\web\.next\server\pages\_document.js
+- C:\Users\chait\OneDrive\Documents\codexhack\apps\web\node_modules\next\dist\server\require.js
+- C:\Users\chait\OneDrive\Documents\codexhack\apps\web\node_modules\next\dist\server\load-components.js
+- C:\Users\chait\OneDrive\Documents\codexhack\apps\web\node_modules\next\dist\build\utils.js
+- C:\Users\chait\OneDrive\Documents\codexhack\apps\web\node_modules\next\dist\build\swc\options.js
+- C:\Users\chait\OneDrive\Documents\codexhack\apps\web\node_modules\next\dist\build\swc\index.js
+- C:\Users\chait\OneDrive\Documents\codexhack\apps\web\node_modules\next\dist\build\next-config-ts\transpile-config.js
+- C:\Users\chait\OneDrive\Documents\codexhack\apps\web\node_modules\next\dist\server\config.js
+- C:\Users\chait\OneDrive\Documents\codexhack\apps\web\node_modules\next\dist\server\next.js
+- C:\Users\chait\OneDrive\Documents\codexhack\apps\web\node_modules\next\dist\server\lib\start-server.js
+    at <unknown> (C:\Users\chait\OneDrive\Documents\codexhack\apps\web\.next\server\app\page.js:2:7842)
+    at Object.<anonymous> (C:\Users\chait\OneDrive\Documents\codexhack\apps\web\.next\server\app\page.js:2:7891) {
+  code: 'MODULE_NOT_FOUND',
+  requireStack: [Array],
+  page: '/'
+}
+ ⨯ [Error: ENOENT: no such file or directory, open 'C:\Users\chait\OneDrive\Documents\codexhack\apps\web\.next\routes-manifest.json'] {
+  errno: -4058,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: 'C:\\Users\\chait\\OneDrive\\Documents\\codexhack\\apps\\web\\.next\\routes-manifest.json'
+}
+[Error: ENOENT: no such file or directory, open 'C:\Users\chait\OneDrive\Documents\codexhack\apps\web\.next\routes-manifest.json'] {
+  errno: -4058,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: 'C:\\Users\\chait\\OneDrive\\Documents\\codexhack\\apps\\web\\.next\\routes-manifest.json'
+}
+[Error: ENOENT: no such file or directory, stat 'C:\Users\chait\OneDrive\Documents\codexhack\apps\web\.next\cache\webpack\server-development\4.pack.gz'] {
+  errno: -4058,
+  code: 'ENOENT',
+  syscall: 'stat',
+  path: 'C:\\Users\\chait\\OneDrive\\Documents\\codexhack\\apps\\web\\.next\\cache\\webpack\\server-development\\4.pack.gz'
+}
+ ⨯ unhandledRejection: [Error: ENOENT: no such file or directory, stat 'C:\Users\chait\OneDrive\Documents\codexhack\apps\web\.next\cache\webpack\server-development\4.pack.gz'] {
+  errno: -4058,
+  code: 'ENOENT',
+  syscall: 'stat',
+  path: 'C:\\Users\\chait\\OneDrive\\Documents\\codexhack\\apps\\web\\.next\\cache\\webpack\\server-development\\4.pack.gz'
+}
+ ⨯ unhandledRejection:  [Error: ENOENT: no such file or directory, stat 'C:\Users\chait\OneDrive\Documents\codexhack\apps\web\.next\cache\webpack\server-development\4.pack.gz'] {
+  errno: -4058,
+  code: 'ENOENT',
+  syscall: 'stat',
+  path: 'C:\\Users\\chait\\OneDrive\\Documents\\codexhack\\apps\\web\\.next\\cache\\webpack\\server-development\\4.pack.gz'
+}
+<w> [webpack.cache.PackFileCacheStrategy] Caching failed for pack: Error: ENOENT: no such file or directory, stat 'C:\Users\chait\OneDrive\Documents\codexhack\apps\web\.next\cache\webpack\server-development\4.pack.gz'
+[Error: ENOENT: no such file or directory, stat 'C:\Users\chait\OneDrive\Documents\codexhack\apps\web\.next\cache\webpack\client-development\5.pack.gz'] {
+  errno: -4058,
+  code: 'ENOENT',
+  syscall: 'stat',
+  path: 'C:\\Users\\chait\\OneDrive\\Documents\\codexhack\\apps\\web\\.next\\cache\\webpack\\client-development\\5.pack.gz'
+}
+ ⨯ unhandledRejection: [Error: ENOENT: no such file or directory, stat 'C:\Users\chait\OneDrive\Documents\codexhack\apps\web\.next\cache\webpack\client-development\5.pack.gz'] {
+  errno: -4058,
+  code: 'ENOENT',
+  syscall: 'stat',
+  path: 'C:\\Users\\chait\\OneDrive\\Documents\\codexhack\\apps\\web\\.next\\cache\\webpack\\client-development\\5.pack.gz'
+}
+ ⨯ unhandledRejection:  [Error: ENOENT: no such file or directory, stat 'C:\Users\chait\OneDrive\Documents\codexhack\apps\web\.next\cache\webpack\client-development\5.pack.gz'] {
+  errno: -4058,
+  code: 'ENOENT',
+  syscall: 'stat',
+  path: 'C:\\Users\\chait\\OneDrive\\Documents\\codexhack\\apps\\web\\.next\\cache\\webpack\\client-development\\5.pack.gz'
+}
+<w> [webpack.cache.PackFileCacheStrategy] Caching failed for pack: Error: ENOENT: no such file or directory, stat 'C:\Users\chait\OneDrive\Documents\codexhack\apps\web\.next\cache\webpack\client-development\5.pack.gz'

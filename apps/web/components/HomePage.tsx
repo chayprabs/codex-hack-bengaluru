@@ -6,7 +6,8 @@ import type { FormEvent } from "react";
 import { useState, useTransition } from "react";
 
 import { DemoRehearsalPanel } from "@/components/DemoRehearsalPanel";
-import { apiClient, getApiErrorMessage } from "@/lib/api";
+import { apiClient, getApiErrorMessage, getApiErrorStatus } from "@/lib/api";
+import { buildLocalPreviewHref } from "@/lib/localDemo";
 import type { AuditMode } from "@/lib/types";
 import { cn, isGithubRepoUrl } from "@/lib/utils";
 
@@ -98,6 +99,21 @@ export function HomePage() {
         router.push(`/audit/${audit.id}`);
       });
     } catch (error) {
+      const status = getApiErrorStatus(error);
+
+      if (status === null || status >= 500) {
+        setFeedback({
+          tone: "success",
+          message:
+            "Live backend unavailable. Opening a seeded local preview matched to this repo so the demo still lands in a coherent audit room.",
+        });
+
+        startTransition(() => {
+          router.push(buildLocalPreviewHref(trimmedUrl, auditMode));
+        });
+        return;
+      }
+
       setFeedback({
         tone: "error",
         message: `${getApiErrorMessage(error)} Need a reliable walkthrough? Open the demo.`,

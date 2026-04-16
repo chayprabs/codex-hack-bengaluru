@@ -1,0 +1,33 @@
+
+> trustlayer-web@0.1.0 dev
+> next dev --port 3000
+
+   ▲ Next.js 15.5.15
+   - Local:        http://localhost:3000
+   - Network:      http://192.168.252.133:3000
+
+ ✓ Starting...
+ ✓ Ready in 2.3s
+ ○ Compiling / ...
+ ✓ Compiled / in 6.8s (637 modules)
+ GET / 200 in 7709ms
+ GET / 200 in 200ms
+ ○ Compiling /wall ...
+ ✓ Compiled /wall in 944ms (650 modules)
+ GET /wall 200 in 1358ms
+ GET /wall 200 in 124ms
+ GET / 200 in 374ms
+ ○ Compiling /audit/[id] ...
+ ✓ Compiled /audit/[id] in 1487ms (691 modules)
+ GET /audit/41df12dd-e4c1-407e-b898-5a79ba64c6a8 200 in 2234ms
+ GET / 200 in 282ms
+ GET /audit/feb27460-23a9-494d-aada-d28a2c431c3a 200 in 161ms
+ ✓ Compiled in 783ms (705 modules)
+ ✓ Compiled in 760ms (705 modules)
+ ○ Compiling /_error ...
+ ✓ Compiled /_error in 14s (1033 modules)
+ GET / 500 in 27198ms
+ GET / 500 in 119ms
+ GET / 500 in 759ms
+ GET / 500 in 335ms
+[?25h

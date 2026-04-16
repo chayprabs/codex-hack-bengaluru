@@ -1,0 +1,19 @@
+[Error: ENOENT: no such file or directory, stat 'C:\Users\chait\OneDrive\Documents\codexhack\apps\web\.next\cache\webpack\client-development\5.pack.gz'] {
+  errno: -4058,
+  code: 'ENOENT',
+  syscall: 'stat',
+  path: 'C:\\Users\\chait\\OneDrive\\Documents\\codexhack\\apps\\web\\.next\\cache\\webpack\\client-development\\5.pack.gz'
+}
+ ⨯ unhandledRejection: [Error: ENOENT: no such file or directory, stat 'C:\Users\chait\OneDrive\Documents\codexhack\apps\web\.next\cache\webpack\client-development\5.pack.gz'] {
+  errno: -4058,
+  code: 'ENOENT',
+  syscall: 'stat',
+  path: 'C:\\Users\\chait\\OneDrive\\Documents\\codexhack\\apps\\web\\.next\\cache\\webpack\\client-development\\5.pack.gz'
+}
+ ⨯ unhandledRejection:  [Error: ENOENT: no such file or directory, stat 'C:\Users\chait\OneDrive\Documents\codexhack\apps\web\.next\cache\webpack\client-development\5.pack.gz'] {
+  errno: -4058,
+  code: 'ENOENT',
+  syscall: 'stat',
+  path: 'C:\\Users\\chait\\OneDrive\\Documents\\codexhack\\apps\\web\\.next\\cache\\webpack\\client-development\\5.pack.gz'
+}
+<w> [webpack.cache.PackFileCacheStrategy] Caching failed for pack: Error: ENOENT: no such file or directory, stat 'C:\Users\chait\OneDrive\Documents\codexhack\apps\web\.next\cache\webpack\client-development\5.pack.gz'

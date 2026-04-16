@@ -5,16 +5,36 @@ import { EmptyState } from "@/components/EmptyState";
 import { ErrorState } from "@/components/ErrorState";
 import { PageShell, pageActionClassName } from "@/components/PageShell";
 import { getApiErrorMessage, getApiErrorStatus, getAudit } from "@/lib/api";
+import { buildLocalPreviewAudit, LOCAL_PREVIEW_AUDIT_ID } from "@/lib/localDemo";
 import { AuditRoomClient } from "./AuditRoomClient";
 
 export const dynamic = "force-dynamic";
 
 type AuditPageProps = {
   params: Promise<{ id: string }>;
+  searchParams?: Promise<{
+    repo?: string | string[];
+    auditMode?: string | string[];
+  }>;
 };
 
-export default async function AuditPage({ params }: AuditPageProps) {
+function firstQueryValue(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+export default async function AuditPage({ params, searchParams }: AuditPageProps) {
   const { id } = await params;
+  const resolvedSearchParams = searchParams ? await searchParams : undefined;
+
+  if (id === LOCAL_PREVIEW_AUDIT_ID) {
+    const repoUrl = firstQueryValue(resolvedSearchParams?.repo)?.trim();
+    const rawAuditMode = firstQueryValue(resolvedSearchParams?.auditMode);
+    const auditMode = rawAuditMode === "deep" ? "deep" : "fast";
+
+    if (repoUrl) {
+      return <AuditRoomClient initialAudit={buildLocalPreviewAudit(repoUrl, auditMode)} />;
+    }
+  }
 
   try {
     const audit = await getAudit(id);
@@ -40,7 +60,11 @@ export default async function AuditPage({ params }: AuditPageProps) {
         {status === 404 ? (
           <EmptyState
             title="Audit not found"
-            description="The requested audit id does not exist in the current API store. Start another audit, or jump straight into the flagship demo room for a predictable walkthrough."
+            description={
+              id === LOCAL_PREVIEW_AUDIT_ID
+                ? "The local preview path needs a repo URL to build a fallback audit room. Start another audit from the landing page, or jump straight into the flagship demo room."
+                : "The requested audit id does not exist in the current API store. Start another audit, or jump straight into the flagship demo room for a predictable walkthrough."
+            }
             action={
               <div className="flex flex-wrap gap-3">
                 <DemoLaunchButton />

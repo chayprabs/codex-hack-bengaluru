@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 
-from ...models import WallEntry
-from ...services.audit_service import audit_service
+from ...models.audit import WallEntry
+from ...services.emergency_audit_service import audit_service
 
 router = APIRouter(tags=["wall"])
 

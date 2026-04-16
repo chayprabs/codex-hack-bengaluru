@@ -7,6 +7,7 @@ import { StatusBadge, formatSeverityBadgeLabel, type StatusBadgeTone } from "@/c
 import { WallTable } from "@/components/WallTable";
 import { formatScore } from "@/lib/format";
 import { getApiErrorMessage, getApiErrorStatus, getWall } from "@/lib/api";
+import { isLocalDemoAuditId } from "@/lib/localDemo";
 import type { FindingSeverity, WallEntry } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -126,6 +127,7 @@ export default async function WallPage({ searchParams }: WallPageProps) {
         : allEntries.filter((entry) => entry.severity === selectedFilter);
     const affectedRepos = new Set(allEntries.map((entry) => entry.repo_url)).size;
     const weakestTrustScore = allEntries.length ? Math.min(...allEntries.map(deriveTrustScore)) : null;
+    const usingLocalWallFallback = allEntries.length > 0 && allEntries.every((entry) => isLocalDemoAuditId(entry.audit_id));
 
     return (
       <PageShell
@@ -144,6 +146,15 @@ export default async function WallPage({ searchParams }: WallPageProps) {
             See the issues that matter most across seeded demos and live scans.
           </p>
         </header>
+
+        {usingLocalWallFallback ? (
+          <section className="rounded-[1.5rem] border border-cyan-200 bg-cyan-50/90 p-4 text-cyan-950">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-700">Fallback wall</p>
+            <p className="mt-2 text-sm leading-6">
+              The backend wall feed was unavailable, so this page is showing the local seeded demo findings instead of live API data.
+            </p>
+          </section>
+        ) : null}
 
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <MetricCard

@@ -1,3 +1,6 @@
+const FIXED_LOCALE = "en-GB";
+const FIXED_TIME_ZONE = "UTC";
+
 export function formatDateTime(value: string | Date | null | undefined) {
   if (!value) {
     return "Unknown time";
@@ -9,9 +12,10 @@ export function formatDateTime(value: string | Date | null | undefined) {
     return "Unknown time";
   }
 
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(FIXED_LOCALE, {
     dateStyle: "medium",
     timeStyle: "short",
+    timeZone: FIXED_TIME_ZONE,
   }).format(date);
 }
 
@@ -27,7 +31,7 @@ export function formatRelativeTime(value: string | Date | null | undefined) {
   }
 
   const deltaSeconds = Math.round((date.getTime() - Date.now()) / 1000);
-  const formatter = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+  const formatter = new Intl.RelativeTimeFormat(FIXED_LOCALE, { numeric: "auto" });
 
   const units: Array<[Intl.RelativeTimeFormatUnit, number]> = [
     ["year", 60 * 60 * 24 * 365],
@@ -53,7 +57,7 @@ export function formatScore(score: number | null | undefined, digits = 0) {
     return "N/A";
   }
 
-  return new Intl.NumberFormat(undefined, {
+  return new Intl.NumberFormat(FIXED_LOCALE, {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
   }).format(score);
@@ -64,7 +68,7 @@ export function formatScoreDelta(delta: number | null | undefined, digits = 0) {
     return "N/A";
   }
 
-  return new Intl.NumberFormat(undefined, {
+  return new Intl.NumberFormat(FIXED_LOCALE, {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
     signDisplay: "always",

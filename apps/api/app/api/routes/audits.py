@@ -2,8 +2,9 @@ from fastapi import APIRouter, HTTPException, Request, status
 from starlette.responses import StreamingResponse
 
 from ...core.sse import build_audit_stream_response
-from ...models import Audit, CreateAuditRequest, DemoSetupResponse
-from ...services.audit_service import (
+from ...models.audit import Audit, CreateAuditRequest
+from ...models.demo import DemoSetupResponse
+from ...services.emergency_audit_service import (
     DemoAuditConfigurationError,
     DemoAuditProfileNotFoundError,
     audit_service,

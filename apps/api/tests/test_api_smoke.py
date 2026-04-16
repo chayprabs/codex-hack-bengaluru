@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import unittest
-from contextlib import ExitStack, asynccontextmanager
+from contextlib import ExitStack
 from typing import Any
 from unittest.mock import patch
 
@@ -10,7 +10,7 @@ from support import ensure_api_path
 
 ensure_api_path()
 
-from fastapi import FastAPI, status
+from fastapi import status
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
@@ -36,11 +36,6 @@ class StubAuditRunner:
         self.started_audits.append((audit_id, mode))
 
 
-@asynccontextmanager
-async def no_lifespan(_: FastAPI):
-    yield
-
-
 class ApiSmokeTests(unittest.TestCase):
     def setUp(self) -> None:
         self.stack = ExitStack()
@@ -52,8 +47,6 @@ class ApiSmokeTests(unittest.TestCase):
             demo_repo_url="https://github.com/example/demo-repo",
         )
 
-        self.stack.enter_context(patch("app.main.lifespan", no_lifespan))
-        self.stack.enter_context(patch("app.api.routes.health.database_runtime", self.runtime))
         self.stack.enter_context(patch("app.api.routes.audits.audit_service", self.audit_service))
         self.stack.enter_context(patch("app.api.routes.wall.audit_service", self.audit_service))
 
@@ -71,11 +64,6 @@ class ApiSmokeTests(unittest.TestCase):
             {
                 "status": "ok",
                 "service": "trustlayer-api",
-                "database": {
-                    "driver": "memory",
-                    "path": ":memory:",
-                    "ready": True,
-                },
             },
         )
 

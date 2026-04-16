@@ -1,0 +1,64 @@
+
+> trustlayer-web@0.1.0 dev
+> next dev --port 3001
+
+   ▲ Next.js 15.5.15
+   - Local:        http://localhost:3001
+   - Network:      http://192.168.252.133:3001
+
+ ✓ Starting...
+ ✓ Ready in 2.4s
+ ○ Compiling / ...
+ ✓ Compiled / in 3s (621 modules)
+ GET / 200 in 3398ms
+ GET / 200 in 75ms
+ ○ Compiling /audit/[id] ...
+ ✓ Compiled /audit/[id] in 1224ms (688 modules)
+ GET /audit/eb89fe9a-a82c-4631-a623-77508d527025 200 in 2541ms
+ ✓ Compiled in 116ms (269 modules)
+ GET /audit/eb89fe9a-a82c-4631-a623-77508d527025 200 in 252ms
+ ✓ Compiled in 119ms (269 modules)
+ ✓ Compiled in 243ms (681 modules)
+ ✓ Compiled in 83ms (269 modules)
+ GET /audit/eb89fe9a-a82c-4631-a623-77508d527025 200 in 421ms
+ ✓ Compiled in 96ms (269 modules)
+ ✓ Compiled in 358ms (684 modules)
+ ✓ Compiled in 151ms (270 modules)
+ ✓ Compiled / in 118ms (421 modules)
+ GET / 200 in 250ms
+ ✓ Compiled /wall in 318ms (681 modules)
+ GET /wall 200 in 768ms
+ GET / 200 in 380ms
+ GET /audit/eb89fe9a-a82c-4631-a623-77508d527025 200 in 351ms
+ ✓ Compiled in 349ms (695 modules)
+ GET /audit/eb89fe9a-a82c-4631-a623-77508d527025 200 in 132ms
+ ✓ Compiled in 955ms (695 modules)
+ ✓ Compiled in 434ms (701 modules)
+ ✓ Compiled in 587ms (705 modules)
+ GET / 200 in 301ms
+ ✓ Compiled in 434ms (705 modules)
+ GET / 200 in 127ms
+ GET /wall 200 in 859ms
+ GET /wall 200 in 534ms
+ ✓ Compiled in 338ms (705 modules)
+ ✓ Compiled in 452ms (705 modules)
+ ○ Compiling /_error ...
+ ✓ Compiled /_error in 2.4s (1037 modules)
+ GET / 500 in 6769ms
+ GET / 500 in 286ms
+ GET /audit/eb89fe9a-a82c-4631-a623-77508d527025 500 in 834ms
+ GET /audit/eb89fe9a-a82c-4631-a623-77508d527025 500 in 379ms
+ GET / 500 in 627ms
+ GET / 500 in 294ms
+ ✓ Compiled in 623ms (1051 modules)
+ GET / 200 in 253ms
+ GET /wall 200 in 37ms
+ GET / 200 in 17ms
+ GET /wall 200 in 9ms
+ GET /wall 200 in 115ms
+ GET /audit/eb89fe9a-a82c-4631-a623-77508d527025 200 in 29ms
+ GET / 200 in 19ms
+ GET /wall 200 in 19ms
+ GET /audit/local-preview?repo=https%3A%2F%2Fgithub.com%2Foctocat%2FHello-World&auditMode=fast 200 in 29ms
+ ✓ Compiled in 355ms (955 modules)
+ ✓ Compiled in 321ms (955 modules)

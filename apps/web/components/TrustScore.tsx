@@ -565,7 +565,7 @@ export function TrustScore({
                     </span>
                   ) : null}
                   <StatusBadge tone={toneFromCoverageBand(moment.coverageBand)} mono>
-                    {titleCase(moment.coverageBand)}
+                    {moment.coverageBand ? titleCase(moment.coverageBand) : "Pending"}
                   </StatusBadge>
                 </div>
 

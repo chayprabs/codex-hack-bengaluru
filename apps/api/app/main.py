@@ -7,8 +7,7 @@ import uvicorn
 
 from .api.router import api_router
 from .core.config import settings
-from .core.lifespan import lifespan
-from .models import ServiceRootResponse
+from .models.common import ServiceRootResponse
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +27,6 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.app_name,
         version="0.1.0",
-        lifespan=lifespan,
     )
 
     app.add_middleware(

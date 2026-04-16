@@ -142,13 +142,16 @@ Notes:
 - On PowerShell, replace `cp` with `Copy-Item`.
 - The default env files use placeholder values only.
 - The API seeds demo wall data on startup.
+- The exact flagship demo path is [http://localhost:3000/audit/demo](http://localhost:3000/audit/demo).
 - The flagship demo path works without adding real provider secrets.
+- If the backend is unavailable, the landing page can still open the seeded demo room, the seeded wall, and a clearly labeled local preview room for create-audit fallbacks.
 - The stable flagship repo path is `https://github.com/trustlayer-demo/acme-subscriptions-platform`.
 
 ## Demo Highlights
 
 - Strongest seeded categories: secrets and credential hygiene, webhook trust, authz/object access, release safety, runtime/dependency exposure, runner-boundary behavior, and coverage/manual-review signaling.
-- Stable flagship path: `https://github.com/trustlayer-demo/acme-subscriptions-platform` with a visible `100 -> 57` TrustScore arc and `12 -> 92` coverage arc.
+- Stable flagship route: `/audit/demo`.
+- Stable flagship repo path: `https://github.com/trustlayer-demo/acme-subscriptions-platform` with a visible `100 -> 57` TrustScore arc and `12 -> 92` coverage arc.
 - Backup paths: the homepage exposes seeded billing, tenant, UI-release, and runner stories if a live repo stays boring, and the audit room falls back to replay sync if SSE drops.
 - Best visible areas for narration: the landing page, the `/audit/[id]` room, the `EvidenceBundleCard`, the `FinalReportSummaryCard`, and the `/wall` leaderboard.
 - Best artifacts to point at live: planner/scanner/verifier lanes, SSE-backed score and coverage motion, replay-vault records, downloadable markdown handoff, and the ranked wall feed.

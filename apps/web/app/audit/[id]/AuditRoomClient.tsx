@@ -14,6 +14,7 @@ import {
 } from "@/lib/auditStory";
 import type { Audit, AuditCompleteEvent, FindingSeverity, ScoreUpdateEvent } from "@/lib/types";
 import { formatDateTime, formatScore } from "@/lib/format";
+import { getLocalAuditNotice } from "@/lib/localDemo";
 import { titleCase } from "@/lib/utils";
 import { useAuditStream } from "@/hooks/useAuditStream";
 import { AgentCard } from "@/components/AgentCard";
@@ -229,6 +230,7 @@ export function AuditRoomClient({ initialAudit }: Readonly<{ initialAudit: Audit
   const selectedTraceAgent = traceAgentName ? audit.agents.find((agent) => agent.name === traceAgentName) ?? null : null;
   const selectedTrace = traceAgentName ? traceByAgentName[traceAgentName] ?? null : null;
   const highImpactCount = audit.findings.filter((finding) => finding.severity === "high" || finding.severity === "critical").length;
+  const localAuditNotice = getLocalAuditNotice(audit.id);
   const findingsEmptyDescription =
     audit.status === "completed"
       ? "This audit finished without persisted findings."
@@ -270,6 +272,13 @@ export function AuditRoomClient({ initialAudit }: Readonly<{ initialAudit: Audit
           updatedAt={audit.updated_at}
           findingsCount={audit.findings.length}
         />
+
+        {localAuditNotice ? (
+          <section className="rounded-[1.5rem] border border-cyan-200 bg-cyan-50/90 p-4 text-cyan-950">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-700">Demo note</p>
+            <p className="mt-2 text-sm leading-6">{localAuditNotice}</p>
+          </section>
+        ) : null}
 
         <AuditStatusBar
           status={audit.status}

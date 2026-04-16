@@ -1,0 +1,2 @@
+INFO:     127.0.0.1:58706 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58706 - "GET /api/wall HTTP/1.1" 200 OK
