@@ -30,6 +30,17 @@ function LoadingCard() {
   );
 }
 
+function EmptyStateCard() {
+  return (
+    <div className="mt-5 rounded-[1.35rem] border border-slate-200 bg-white/90 px-4 py-4 shadow-sm">
+      <p className="text-sm font-semibold text-slate-900">No seeded demo profiles are configured.</p>
+      <p className="mt-2 text-sm leading-6 text-slate-600">
+        The main demo is still available from the home page, but this panel could not load profile details.
+      </p>
+    </div>
+  );
+}
+
 function BackupProfileCard({
   profile,
   pendingKey,
@@ -45,7 +56,7 @@ function BackupProfileCard({
     <article className="rounded-[1.35rem] border border-slate-200 bg-white/92 p-4 shadow-sm">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Backup seeded story</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Backup demo path</p>
           <h4 className="mt-2 text-lg font-semibold tracking-[-0.02em] text-slate-950">{profile.label}</h4>
         </div>
         <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
@@ -78,7 +89,7 @@ function BackupProfileCard({
         disabled={Boolean(pendingKey)}
         className="mt-4 inline-flex min-h-11 items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-800 transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
       >
-        {isLaunching ? "Opening backup room..." : "Open backup room"}
+        {isLaunching ? "Opening backup demo..." : "Open backup demo"}
       </button>
     </article>
   );
@@ -141,17 +152,16 @@ export function DemoRehearsalPanel() {
     <section className="mt-5 rounded-[1.5rem] border border-slate-200 bg-[linear-gradient(135deg,rgba(248,250,252,0.96),rgba(255,255,255,0.95))] p-5">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div className="max-w-3xl">
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Demo rehearsal kit</p>
-          <h3 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-slate-950">Stable path, visible backups</h3>
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Demo setup</p>
+          <h3 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-slate-950">Primary path, clear backups</h3>
           <p className="mt-3 text-sm leading-6 text-slate-600">
-            Keep one flagship room on rails: a pinned repo path, coherent seeded findings, predictable TrustScore motion,
-            and backup stories ready if a live repo stays boring.
+            Keep one primary demo path stable: a pinned repo, clear seeded findings, predictable score motion, and backups ready if a live repo stays quiet.
           </p>
         </div>
 
         {setup ? (
           <span className="rounded-full border border-slate-200 bg-white px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
-            {profiles.length} seeded stories
+            {profiles.length} demo paths
           </span>
         ) : null}
       </div>
@@ -167,22 +177,24 @@ export function DemoRehearsalPanel() {
           <p className="font-semibold text-amber-950">Demo setup unavailable</p>
           <p className="mt-2">{loadError}</p>
         </div>
-      ) : !setup || !flagship ? (
+      ) : !setup ? (
         <div className="mt-5 grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
           <LoadingCard />
           <LoadingCard />
         </div>
+      ) : !flagship ? (
+        <EmptyStateCard />
       ) : (
         <>
           <article className="mt-5 rounded-[1.5rem] border border-slate-200 bg-slate-950 px-5 py-5 text-white">
             <div className="grid gap-5 xl:grid-cols-[1.08fr_0.92fr]">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Flagship room</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Primary demo</p>
                 <h4 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-white">{flagship.label}</h4>
                 <p className="mt-3 text-sm leading-6 text-slate-300">{flagship.summary}</p>
 
                 <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Stable repo path</p>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Demo repo</p>
                   <p className="mt-2 font-mono text-sm font-semibold text-white">{setup.primary_demo_repo_url}</p>
                 </div>
 
@@ -204,7 +216,7 @@ export function DemoRehearsalPanel() {
                     disabled={Boolean(pendingKey)}
                     className="inline-flex min-h-12 items-center justify-center rounded-2xl bg-white px-5 text-sm font-semibold text-slate-900 transition hover:-translate-y-0.5 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    {pendingKey === flagship.key ? "Opening flagship room..." : "Open flagship room"}
+                    {pendingKey === flagship.key ? "Opening primary demo..." : "Open primary demo"}
                   </button>
                   <span className="font-mono text-xs uppercase tracking-[0.16em] text-slate-400">
                     {flagship.finding_count} seeded findings
@@ -222,10 +234,10 @@ export function DemoRehearsalPanel() {
                   <p className="mt-2 font-mono text-sm font-semibold text-white">{formatJourney(flagship.coverage_journey)}</p>
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Final report close</p>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Final report</p>
                   <p className="mt-2 text-sm leading-6 text-slate-200">
                     {flagship.completion_message ??
-                      "The seeded room closes with a clear remediation handoff instead of a vague status message."}
+                      "This demo ends with a clear handoff, not a vague status line."}
                   </p>
                 </div>
               </div>
@@ -234,11 +246,11 @@ export function DemoRehearsalPanel() {
 
           <div className="mt-4 grid gap-4 xl:grid-cols-2">
             <article className="rounded-[1.35rem] border border-slate-200 bg-white/90 px-4 py-4 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">If stream updates fail</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">If live updates fail</p>
               <p className="mt-3 text-sm leading-6 text-slate-700">{setup.stream_backup_summary}</p>
             </article>
             <article className="rounded-[1.35rem] border border-slate-200 bg-white/90 px-4 py-4 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">If a live repo is boring</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">If the live repo is quiet</p>
               <p className="mt-3 text-sm leading-6 text-slate-700">{setup.boring_repo_backup_summary}</p>
             </article>
           </div>

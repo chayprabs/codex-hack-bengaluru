@@ -11,26 +11,26 @@ export default function NotFound() {
       actions={
         <>
           <Link href="/" className={pageActionClassName}>
-            Run another audit
+            New audit
           </Link>
           <Link href="/wall" className={pageActionClassName}>
-            Open audit wall
+            View wall
           </Link>
         </>
       }
     >
       <EmptyState
         eyebrow="Route not found"
-        title="This page does not exist in the audit workspace"
-        description="The route you opened is not available in this build. Start another audit, or jump into the flagship demo room for the strongest walkthrough."
+        title="This page is not available"
+        description="The route you opened is not part of this build. Start a new audit or open the demo."
         action={
           <div className="flex flex-wrap gap-3">
             <DemoLaunchButton />
             <Link href="/" className={pageActionClassName}>
-              Back to landing page
+              Back to home
             </Link>
             <Link href="/wall" className={pageActionClassName}>
-              Open audit wall
+              View wall
             </Link>
           </div>
         }

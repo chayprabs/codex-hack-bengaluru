@@ -13,8 +13,8 @@ type DemoLaunchButtonProps = {
 };
 
 export function DemoLaunchButton({
-  idleLabel = "Open flagship demo",
-  pendingLabel = "Opening flagship demo...",
+  idleLabel = "Open demo",
+  pendingLabel = "Opening demo...",
   className,
 }: Readonly<DemoLaunchButtonProps>) {
   const router = useRouter();

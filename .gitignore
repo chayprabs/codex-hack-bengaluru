@@ -20,5 +20,6 @@ logs/
 __pycache__/
 *.pyc
 *.db
+*.tsbuildinfo
 
 .DS_Store

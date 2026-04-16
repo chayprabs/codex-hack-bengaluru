@@ -57,13 +57,13 @@ export function describeScoreUpdate(
 
     const clause = reasonClause(reason);
     if ((update.delta ?? 0) < 0) {
-      return `Score dropped because ${clause}.`;
+      return `Score fell because ${clause}.`;
     }
     if ((update.delta ?? 0) > 0) {
       return `Score improved after ${clause}.`;
     }
     if ((update.coverage_delta ?? 0) < 0 || update.confidence_limited) {
-      return `Coverage reduced confidence because ${clause}.`;
+      return `Coverage limited confidence because ${clause}.`;
     }
     if ((update.coverage_delta ?? 0) > 0) {
       return `Coverage improved because ${clause}.`;
@@ -73,7 +73,7 @@ export function describeScoreUpdate(
   }
 
   if ((update.delta ?? 0) < 0) {
-    return "Score dropped after a new audit signal landed.";
+    return "Score fell after a new audit signal landed.";
   }
   if ((update.delta ?? 0) > 0) {
     return "Score improved after a clean verification step landed.";
@@ -113,8 +113,8 @@ export function describeAuditScoreSnapshot(
   }
 
   if (audit.status === "completed") {
-    return "Score held after verifier closeout found no persisted findings in the audited scope.";
+    return "Score held after review closed with no persisted findings in scope.";
   }
 
-  return "Coverage is still expanding while planner, scanner, and verifier settle.";
+  return "Coverage is still expanding while the audit settles.";
 }

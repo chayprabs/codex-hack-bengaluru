@@ -12,7 +12,7 @@ import { cn, isGithubRepoUrl } from "@/lib/utils";
 
 const stats = [
   { label: "Demo Launch", value: "< 10 sec", detail: "Open the demo fast and start showing findings right away." },
-  { label: "Demo Paths", value: "5 rooms", detail: "Flagship plus four backup seeded stories keep the rehearsal reliable." },
+  { label: "Demo Paths", value: "5 seeded paths", detail: "One primary path plus four backups keeps the demo reliable." },
   { label: "Score Steps", value: "5 moves", detail: "Planner, scanner, and verifier move the score in a clear sequence." },
   { label: "Scope Guardrails", value: "No false confidence", detail: "Low coverage stays clearly marked instead of reading like a pass." },
 ];
@@ -220,7 +220,7 @@ export function HomePage() {
                     disabled={isWorking}
                     className="inline-flex min-h-12 items-center justify-center rounded-2xl bg-white px-5 text-sm font-semibold text-slate-900 transition hover:-translate-y-0.5 hover:bg-slate-100 focus:outline-none focus:ring-4 focus:ring-white/20 disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    {pendingAction === "demo" ? "Opening room..." : "Open demo"}
+                    {pendingAction === "demo" ? "Opening demo..." : "Open demo"}
                   </button>
                 </div>
 

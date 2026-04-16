@@ -31,38 +31,38 @@ const BUCKET_DEFINITIONS: readonly FindingBucketDefinition[] = [
   {
     id: "secrets_credentials",
     label: "Secrets and credentials",
-    quickTake: "Exposed keys can turn a code bug into real account or infrastructure access.",
-    fixHint: "Rotate real values first, then move secrets out of code, prompts, and client bundles.",
+    quickTake: "Exposed keys can become real account or infrastructure access.",
+    fixHint: "Rotate live values first, then remove secrets from code, examples, and client bundles.",
   },
   {
     id: "auth_access",
     label: "Auth and access control",
-    quickTake: "If identity or ownership checks drift, users can cross tenant lines fast.",
+    quickTake: "Weak identity or ownership checks let users cross tenant or role boundaries.",
     fixHint: "Start with session assumptions, object lookups, and any allow-all policy code.",
   },
   {
     id: "webhook_integrations",
     label: "Webhook and external integrations",
-    quickTake: "Outside systems should not change state until the sender is proven.",
-    fixHint: "Verify signatures first, then handle idempotency and replay safety.",
+    quickTake: "Outside systems should not change state until the sender is verified.",
+    fixHint: "Verify signatures first, then enforce idempotency and replay protection.",
   },
   {
     id: "unsafe_generated_code",
     label: "Unsafe generated code patterns",
-    quickTake: "Risky shortcuts in code or agent rules can turn input into execution or unsafe state changes.",
-    fixHint: "Search for eval-like execution, raw SQL, unsafe parsing, and security-bypass guidance.",
+    quickTake: "Execution shortcuts can turn input into code or unsafe state changes.",
+    fixHint: "Look for eval-like execution, raw SQL, unsafe parsing, and security bypasses.",
   },
   {
     id: "dependency_setup",
     label: "Dependency and setup risks",
     quickTake: "Build and install paths can import risk before the app even boots.",
-    fixHint: "Lock versions, review install hooks, and keep build, lint, and type gates honest.",
+    fixHint: "Pin versions, review install hooks, and keep build, lint, and type gates blocking.",
   },
   {
     id: "frontend_exposure",
     label: "Frontend exposure risks",
-    quickTake: "Anything shipped to the browser should be treated as public and abusable.",
-    fixHint: "Strip client secrets, tighten browser-facing config, and remove unsafe HTML paths.",
+    quickTake: "Anything shipped to the browser should be treated as public.",
+    fixHint: "Remove client secrets, tighten browser-facing config, and cut unsafe HTML paths.",
   },
 ];
 

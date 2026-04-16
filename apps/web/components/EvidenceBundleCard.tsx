@@ -82,18 +82,18 @@ function findingVerificationLabel(finding: Audit["findings"][number], audit: Aud
 
   const verifier = audit.agents.find((agent) => agent.name.toLowerCase() === "verifier");
   if (verifier?.status === "completed") {
-    return "Not verifier-reviewed";
+    return "Unreviewed";
   }
 
   if (verifier?.status === "running") {
-    return "Verifier running";
+    return "Review running";
   }
 
   if (audit.status === "failed") {
-    return "Verification did not close";
+    return "Review blocked";
   }
 
-  return "Not verifier-reviewed";
+  return "Unreviewed";
 }
 
 function buildFindingAnchor(finding: Audit["findings"][number], story?: FindingStory) {

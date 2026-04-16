@@ -1,0 +1,16 @@
+
+> trustlayer-web@0.1.0 dev
+> next dev
+
+   ▲ Next.js 15.5.15
+   - Local:        http://localhost:3000
+   - Network:      http://192.168.252.133:3000
+
+ ✓ Starting...
+ ✓ Ready in 2.5s
+ ○ Compiling / ...
+ ✓ Compiled / in 2.5s (621 modules)
+ GET / 200 in 2859ms
+ GET / 200 in 56ms
+ ✓ Compiled /wall in 354ms (633 modules)
+ GET /wall 200 in 592ms

@@ -37,7 +37,7 @@ Main API routes:
 - `/api/health` for health status.
 - `/api/demo-setup` to expose the stable flagship demo repo, backup stories, and score journeys.
 - `/api/audits` to create audits.
-- `/api/demo-audit` to open the deterministic flagship room.
+- `/api/demo-audit` to open the deterministic flagship room, with optional `profile_key` support for backup seeded stories.
 - `/api/audits/{id}` to fetch audit state.
 - `/api/audits/{id}/stream` for SSE-backed room updates with polling fallback on the frontend.
 - `/api/wall` for the wall feed.
@@ -99,6 +99,7 @@ The categories below are seeded demo findings or deterministic audit scenarios w
 |       `-- tests/              # lifecycle, formatting, replay, and coverage tests
 |-- docs/
 |   |-- demo-highlights.md
+|   |-- demo-script.md
 |   `-- release-checklist.md
 |-- infra/                      # docker-oriented infrastructure helpers
 |-- scripts/                    # setup/dev helpers and smoke tools

@@ -16,8 +16,8 @@ from starlette.requests import Request
 
 from app.db import DatabaseRuntime
 from app.main import create_app
+from app.api.routes.audits import stream_audit
 from app.models import AgentStatus, Audit, Finding
-from app.routes.audits import stream_audit
 from app.services.audit_service import AuditService
 
 
@@ -54,7 +54,7 @@ class ApiSmokeTests(unittest.TestCase):
 
         self.stack.enter_context(patch("app.main.lifespan", no_lifespan))
         self.stack.enter_context(patch("app.api.routes.health.database_runtime", self.runtime))
-        self.stack.enter_context(patch("app.routes.audits.audit_service", self.audit_service))
+        self.stack.enter_context(patch("app.api.routes.audits.audit_service", self.audit_service))
         self.stack.enter_context(patch("app.api.routes.wall.audit_service", self.audit_service))
 
         self.client = self.stack.enter_context(TestClient(create_app()))
