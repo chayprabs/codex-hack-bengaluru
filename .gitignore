@@ -6,14 +6,18 @@ coverage/
 logs/
 
 .env
-.env.local
+.env.*
+!.env.example
+!**/.env.example
+!**/.env.local.example
 .venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
 
 __pycache__/
 *.pyc
 *.db
 
 .DS_Store
-
-!**/.env.example
-!**/.env.local.example

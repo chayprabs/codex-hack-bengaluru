@@ -1,0 +1,16 @@
+.git
+.env
+.env.*
+node_modules
+.next
+dist
+build
+coverage
+logs
+apps/web
+apps/api/.venv
+apps/api/trustlayer.db
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.ruff_cache

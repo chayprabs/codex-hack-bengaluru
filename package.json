@@ -1,0 +1,12 @@
+{
+  "name": "trustlayer",
+  "private": true,
+  "scripts": {
+    "setup": "node scripts/setup.mjs",
+    "setup:web": "node scripts/setup.mjs web",
+    "setup:api": "node scripts/setup.mjs api",
+    "dev": "node scripts/dev.mjs",
+    "dev:web": "node scripts/dev.mjs web",
+    "dev:api": "node scripts/dev.mjs api"
+  }
+}
