@@ -13,12 +13,12 @@ from fastapi import Request
 from pydantic import BaseModel
 from starlette.responses import StreamingResponse
 
-AuditEventName = Literal["agent_status", "finding", "score_update", "audit_complete"]
+from ..models import AuditStreamEventName
 
 
 @dataclass(frozen=True, slots=True)
 class SSEMessage:
-    event: AuditEventName
+    event: AuditStreamEventName
     data: Any
     event_id: str
     retry: int | None = None
@@ -87,7 +87,7 @@ class AuditEventBroker:
     def build_message(
         self,
         audit_id: str,
-        event: AuditEventName,
+        event: AuditStreamEventName,
         payload: Any,
         *,
         event_id: str | None = None,
@@ -122,7 +122,7 @@ class AuditEventBroker:
     def publish(
         self,
         audit_id: str,
-        event: AuditEventName,
+        event: AuditStreamEventName,
         payload: Any,
         *,
         event_id: str | None = None,
@@ -214,7 +214,7 @@ audit_event_broker = AuditEventBroker()
 
 def build_audit_event(
     audit_id: str,
-    event: AuditEventName,
+    event: AuditStreamEventName,
     payload: Any,
     *,
     event_id: str | None = None,
@@ -295,7 +295,7 @@ def build_audit_complete_event(
 
 def publish_audit_event(
     audit_id: str,
-    event: AuditEventName,
+    event: AuditStreamEventName,
     payload: Any,
     *,
     event_id: str | None = None,

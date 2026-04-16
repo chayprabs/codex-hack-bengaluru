@@ -23,6 +23,7 @@ export type Audit = {
   id: string;
   repo_url: string;
   status: AuditState;
+  score: number;
   created_at: string;
   updated_at: string;
   agents: AgentStatus[];
@@ -59,11 +60,32 @@ export type HealthCheckResponse = {
 };
 
 export type ScoreUpdateEvent = {
-  type: "score_update";
   audit_id: string;
   score: number;
-  previous_score?: number | null;
-  delta?: number | null;
-  label?: string | null;
-  created_at: string;
+  previous_score: number | null;
+  delta: number | null;
+  reason?: string | null;
+  updated_at: string;
 };
+
+export type AgentStatusEvent = AgentStatus & {
+  audit_id: string;
+};
+
+export type FindingEvent = Finding & {
+  audit_id: string;
+};
+
+export type AuditCompleteEvent = {
+  audit_id: string;
+  status: AuditState;
+  repo_url: string;
+  score: number;
+  updated_at: string;
+  finding_count: number;
+  message?: string | null;
+};
+
+export type AuditStreamEventName = "agent_status" | "finding" | "score_update" | "audit_complete";
+
+export type AuditStreamConnectionState = "connecting" | "live" | "reconnecting" | "closed";

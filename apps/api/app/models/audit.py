@@ -3,17 +3,14 @@ from urllib.parse import urlparse
 from typing import Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import Field, field_validator
 
-from .common import utc_now
+from .common import StrictModel, utc_now
 
 AuditState = Literal["queued", "running", "completed", "failed"]
 AgentState = Literal["queued", "running", "completed", "failed"]
 FindingSeverity = Literal["low", "medium", "high", "critical"]
-
-
-class StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+AuditStreamEventName = Literal["agent_status", "finding", "score_update", "audit_complete"]
 
 
 class Finding(StrictModel):
@@ -22,7 +19,7 @@ class Finding(StrictModel):
     title: str
     summary: str
     file_path: str | None = None
-    line: int | None = None
+    line: int | None = Field(default=None, ge=1)
     created_at: datetime = Field(default_factory=utc_now)
 
 
@@ -37,6 +34,7 @@ class Audit(StrictModel):
     id: str
     repo_url: str
     status: AuditState = "queued"
+    score: int = Field(default=100, ge=0, le=100)
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
     agents: list[AgentStatus] = Field(default_factory=list)

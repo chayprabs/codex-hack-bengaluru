@@ -1,20 +1,17 @@
 from fastapi import APIRouter
 
 from ...core.config import settings
+from ...db import database_runtime
 from ...models import DatabaseHealth, HealthCheckResponse
-from ...repositories.database import sqlite_database
 
 router = APIRouter(tags=["health"])
 
 
 @router.get("/health", response_model=HealthCheckResponse)
 def health_check() -> HealthCheckResponse:
+    database_health: DatabaseHealth = database_runtime.health()
     return HealthCheckResponse(
         status="ok",
         service=settings.service_slug,
-        database=DatabaseHealth(
-            driver="sqlite",
-            path=str(sqlite_database.path),
-            ready=sqlite_database.path.exists(),
-        ),
+        database=database_health,
     )

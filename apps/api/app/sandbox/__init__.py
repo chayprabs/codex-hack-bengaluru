@@ -1,6 +1,14 @@
 """Reusable sandbox workspace helpers for the TrustLayer API."""
 
 from .cleanup import cleanup_stale_workspaces, cleanup_workspace
+from .execution_layer import (
+    ExecutionBackendSelection,
+    ExecutionLayer,
+    ExecutionLayerError,
+    ExecutionSession,
+    acquire_execution_workspace,
+    resolve_execution_backend,
+)
 from .executor import (
     DEFAULT_ALLOWED_EXECUTABLES,
     CommandResult,
@@ -33,6 +41,10 @@ __all__ = [
     "CommandResult",
     "DEFAULT_WORKSPACE_PREFIX",
     "DEFAULT_ALLOWED_EXECUTABLES",
+    "ExecutionBackendSelection",
+    "ExecutionLayer",
+    "ExecutionLayerError",
+    "ExecutionSession",
     "FileReplacement",
     "GitHubRepoReference",
     "PatchApplicationError",
@@ -44,6 +56,7 @@ __all__ = [
     "WorkspaceDiffSummary",
     "WorkspaceManager",
     "acquire_repository",
+    "acquire_execution_workspace",
     "apply_patch_text",
     "cleanup_stale_workspaces",
     "cleanup_workspace",
@@ -51,6 +64,7 @@ __all__ = [
     "copy_local_repository",
     "create_workspace",
     "get_sandbox_root",
+    "resolve_execution_backend",
     "run_command",
     "safe_join",
     "summarize_workspace_diff",

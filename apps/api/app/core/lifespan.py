@@ -2,12 +2,12 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from ..repositories.database import sqlite_database
+from ..db import database_runtime
 from ..services.audit_service import audit_service
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    sqlite_database.initialize()
+    database_runtime.initialize()
     audit_service.seed_demo_data()
     yield

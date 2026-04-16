@@ -62,8 +62,8 @@ export function TrustScore({
 }: Readonly<TrustScoreProps>) {
   const resolvedScore = event?.score ?? score ?? null;
   const resolvedPreviousScore = event?.previous_score ?? previousScore ?? null;
-  const resolvedLabel = event?.label ?? label ?? "Trust score";
-  const resolvedUpdatedAt = event?.created_at ?? updatedAt ?? null;
+  const resolvedLabel = label ?? event?.reason ?? "Trust score";
+  const resolvedUpdatedAt = updatedAt ?? event?.updated_at ?? null;
   const resolvedDelta =
     event?.delta ?? delta ?? (resolvedScore !== null && resolvedPreviousScore !== null ? resolvedScore - resolvedPreviousScore : null);
 

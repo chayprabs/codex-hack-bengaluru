@@ -3,15 +3,25 @@ from uuid import uuid4
 from pydantic import ValidationError
 
 from ..core.config import settings
+from ..db import AuditRepository, audit_repository
 from ..core.sse import (
     SSEMessage,
     build_agent_status_event,
     build_audit_complete_event,
     build_finding_event,
+    build_score_update_event,
     publish_agent_status,
+    publish_score_update,
 )
-from ..models import Audit, CreateAuditRequest, WallEntry
-from ..repositories.audit_repository import InMemoryAuditRepository, audit_repository
+from ..models import (
+    AgentStatusEvent,
+    Audit,
+    AuditCompleteEvent,
+    CreateAuditRequest,
+    FindingEvent,
+    ScoreUpdateEvent,
+    WallEntry,
+)
 from .audit_runner import AuditRunner, audit_runner
 
 
@@ -22,7 +32,7 @@ class DemoAuditConfigurationError(RuntimeError):
 class AuditService:
     def __init__(
         self,
-        repository: InMemoryAuditRepository,
+        repository: AuditRepository,
         runner: AuditRunner,
         demo_repo_url: str,
     ) -> None:
@@ -37,13 +47,26 @@ class AuditService:
             status="queued",
             agents=self.runner.build_initial_agents(),
         )
-        stored_audit = self.repository.save(audit)
+        stored_audit = self.repository.create_audit(audit)
         for agent in stored_audit.agents:
-            publish_agent_status(stored_audit.id, agent)
+            publish_agent_status(
+                stored_audit.id,
+                AgentStatusEvent.from_agent_status(stored_audit.id, agent),
+            )
+        publish_score_update(
+            stored_audit.id,
+            ScoreUpdateEvent.from_audit(
+                stored_audit,
+                previous_score=stored_audit.score,
+                delta=0,
+                reason="Audit queued and waiting for the lifecycle runner to start.",
+            ),
+        )
+        self.runner.start(stored_audit.id)
         return stored_audit
 
     def get_audit(self, audit_id: str) -> Audit | None:
-        return self.repository.get(audit_id)
+        return self.repository.get_audit(audit_id)
 
     def get_stream_snapshot(self, audit_id: str) -> list[SSEMessage] | None:
         audit = self.get_audit(audit_id)
@@ -61,14 +84,13 @@ class AuditService:
         return self.create_audit(demo_request)
 
     def list_wall(self) -> list[WallEntry]:
-        return self.repository.list_wall()
+        return self.repository.list_wall_entries()
 
     def seed_demo_data(self) -> None:
-        if self.repository.has_entries():
+        if self.repository.has_audits():
             return
 
-        demo_audit = self.create_demo_audit()
-        self.repository.save(self.runner.build_demo_result(demo_audit))
+        self.create_demo_audit()
 
     def _build_stream_snapshot(self, audit: Audit) -> list[SSEMessage]:
         snapshot: list[SSEMessage] = []
@@ -77,7 +99,7 @@ class AuditService:
             snapshot.append(
                 build_agent_status_event(
                     audit.id,
-                    agent,
+                    AgentStatusEvent.from_agent_status(audit.id, agent),
                     event_id=f"{audit.id}:snapshot:agent:{index}",
                 )
             )
@@ -86,21 +108,29 @@ class AuditService:
             snapshot.append(
                 build_finding_event(
                     audit.id,
-                    finding,
+                    FindingEvent.from_finding(audit.id, finding),
                     event_id=f"{audit.id}:snapshot:finding:{index}",
                 )
             )
+
+        snapshot.append(
+            build_score_update_event(
+                audit.id,
+                ScoreUpdateEvent.from_audit(
+                    audit,
+                    previous_score=audit.score,
+                    delta=0,
+                    reason="Current audit score snapshot.",
+                ),
+                event_id=f"{audit.id}:snapshot:score",
+            )
+        )
 
         if audit.status in {"completed", "failed"}:
             snapshot.append(
                 build_audit_complete_event(
                     audit.id,
-                    {
-                        "status": audit.status,
-                        "repo_url": audit.repo_url,
-                        "updated_at": audit.updated_at,
-                        "finding_count": len(audit.findings),
-                    },
+                    AuditCompleteEvent.from_audit(audit),
                     event_id=f"{audit.id}:snapshot:complete",
                 )
             )

@@ -1,14 +1,10 @@
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
-
-
-class StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+from .common import StrictModel
 
 
 class DatabaseHealth(StrictModel):
-    driver: Literal["sqlite"] = "sqlite"
+    driver: Literal["memory", "sqlite"]
     path: str
     ready: bool
 

@@ -12,14 +12,19 @@ import type {
 } from "@/lib/types";
 
 export type {
+  AgentStatusEvent,
   AgentState,
   AgentStatus,
   Audit,
+  AuditCompleteEvent,
+  AuditStreamConnectionState,
+  AuditStreamEventName,
   AuditState,
   AuditStreamStatus,
   CreateAuditRequest,
   DatabaseHealth,
   Finding,
+  FindingEvent,
   FindingSeverity,
   HealthCheckResponse,
   ScoreUpdateEvent,

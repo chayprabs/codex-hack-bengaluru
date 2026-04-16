@@ -5,6 +5,7 @@ from .audit import (
     AgentStatus,
     Audit,
     AuditState,
+    AuditStreamEventName,
     CreateAuditRequest,
     Finding,
     FindingSeverity,
@@ -12,17 +13,30 @@ from .audit import (
 )
 from .common import utc_now
 from .health import DatabaseHealth, HealthCheckResponse
+from .stream import (
+    AgentStatusEvent,
+    AuditCompleteEvent,
+    AuditStreamEventData,
+    FindingEvent,
+    ScoreUpdateEvent,
+)
 
 __all__ = [
     "AgentState",
     "AgentStatus",
+    "AgentStatusEvent",
     "Audit",
+    "AuditCompleteEvent",
     "AuditState",
+    "AuditStreamEventData",
+    "AuditStreamEventName",
     "CreateAuditRequest",
     "DatabaseHealth",
     "Finding",
+    "FindingEvent",
     "FindingSeverity",
     "HealthCheckResponse",
+    "ScoreUpdateEvent",
     "WallEntry",
     "utc_now",
 ]
