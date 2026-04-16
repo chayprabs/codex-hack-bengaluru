@@ -807,12 +807,12 @@ def _node_typecheck_command(
     if not has_tsconfig or "typescript" not in package_dependencies:
         return None
     if package_manager == "pnpm":
-        return (_node_executable("pnpm"), "exec", "tsc", "--noEmit")
+        return (_node_executable("pnpm"), "exec", "tsc", "--noEmit", "-p", "tsconfig.json")
     if package_manager == "yarn":
-        return (_node_executable("yarn"), "tsc", "--noEmit")
+        return (_node_executable("yarn"), "tsc", "--noEmit", "-p", "tsconfig.json")
     if package_manager == "bun":
-        return (_node_executable("bun"), "x", "tsc", "--noEmit")
-    return (_node_executable("npx"), "tsc", "--noEmit")
+        return (_node_executable("bun"), "x", "tsc", "--noEmit", "-p", "tsconfig.json")
+    return (_node_executable("npx"), "tsc", "--noEmit", "-p", "tsconfig.json")
 
 
 def _needs_node_install(root: Path) -> bool:

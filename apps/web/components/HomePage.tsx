@@ -12,7 +12,7 @@ const DEMO_REPO_URL = "https://github.com/vercel/next.js";
 
 const stats = [
   { label: "Kickoff Time", value: "< 60 sec", detail: "From repo paste to visible audit room." },
-  { label: "Review Tracks", value: "4 lanes", detail: "Planner, scanner, verifier, and report feed." },
+  { label: "Review Tracks", value: "3 lanes", detail: "Planner, scanner, and verifier lanes in the live room." },
   { label: "Signal Ready", value: "SSE", detail: "Prepared for live agent progress streaming." },
   { label: "Hackathon Mode", value: "Zero auth", detail: "Direct, fast setup for demos and iteration." },
 ];
@@ -238,7 +238,7 @@ export function HomePage() {
               </div>
 
               <div className="mt-5 space-y-3 rounded-2xl border border-slate-200 bg-slate-950 px-5 py-4 text-sm leading-6 text-slate-200">
-                <p>The landing page now creates audits and routes into `/audit/[id]` using the typed frontend client.</p>
+                <p>The landing page creates audits and routes into `/audit/[id]` using the typed frontend client.</p>
                 <Link href="/wall" className="inline-flex font-semibold text-signal transition hover:text-white">
                   Open the shame wall
                 </Link>

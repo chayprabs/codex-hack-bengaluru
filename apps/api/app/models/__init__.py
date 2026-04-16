@@ -11,7 +11,7 @@ from .audit import (
     FindingSeverity,
     WallEntry,
 )
-from .common import utc_now
+from .common import ServiceRootResponse, utc_now
 from .health import DatabaseHealth, HealthCheckResponse
 from .stream import (
     AgentStatusEvent,
@@ -37,6 +37,7 @@ __all__ = [
     "FindingSeverity",
     "HealthCheckResponse",
     "ScoreUpdateEvent",
+    "ServiceRootResponse",
     "WallEntry",
     "utc_now",
 ]

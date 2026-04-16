@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Literal
 
 from pydantic import Field
@@ -23,6 +23,7 @@ from .scoring import ScoringService, TrustScoreSummary, scoring_service
 
 AgentExecutionMode = Literal["auto", "no_execution"]
 AgentRunStatus = Literal["completed", "needs_review", "failed"]
+AgentResultCallback = Callable[[AgentResult], None]
 
 DEFAULT_SPECIALIST_ORDER = (
     "secrets",
@@ -45,6 +46,7 @@ __all__ = [
     "AgentRunResultSummary",
     "AgentRunResult",
     "AgentRunStatus",
+    "AgentResultCallback",
     "AgentSystemRunner",
     "run_agent_system",
     "agent_system_runner",
@@ -116,6 +118,7 @@ class AgentSystemRunner:
         ref: str | None = None,
         selected_agents: Sequence[str] | None = None,
         execution_mode: AgentExecutionMode = "auto",
+        on_agent_result: AgentResultCallback | None = None,
     ) -> AgentRunResult:
         normalized = self._normalize_request(
             request,
@@ -139,6 +142,7 @@ class AgentSystemRunner:
 
         mapper_result = await self._run_required_agent("repo_mapper", base_context)
         agent_results.append(mapper_result)
+        self._notify_result(on_agent_result, mapper_result)
 
         repo_map = self._extract_repo_map(mapper_result)
         if repo_map is None:
@@ -155,6 +159,7 @@ class AgentSystemRunner:
         )
         planner_result = await self._run_required_agent("planner", planner_context)
         agent_results.append(planner_result)
+        self._notify_result(on_agent_result, planner_result)
 
         work_plan = self._extract_work_plan(planner_result)
         if work_plan is None:
@@ -184,10 +189,12 @@ class AgentSystemRunner:
                     summary="Skipped because the agent runner was asked to avoid command execution.",
                 )
                 agent_results.append(synthetic)
+                self._notify_result(on_agent_result, synthetic)
                 continue
 
             result = await self._run_optional_agent(agent_name, specialist_context)
             agent_results.append(result)
+            self._notify_result(on_agent_result, result)
 
         return self._finalize_result(
             request=normalized,
@@ -363,6 +370,14 @@ class AgentSystemRunner:
             return []
         return self._select_agents(request, work_plan)
 
+    @staticmethod
+    def _notify_result(
+        callback: AgentResultCallback | None,
+        result: AgentResult,
+    ) -> None:
+        if callback is not None:
+            callback(result)
+
 
 async def run_agent_system(
     request: AgentRunRequest | None = None,
@@ -374,6 +389,7 @@ async def run_agent_system(
     ref: str | None = None,
     selected_agents: Sequence[str] | None = None,
     execution_mode: AgentExecutionMode = "auto",
+    on_agent_result: AgentResultCallback | None = None,
 ) -> AgentRunResult:
     return await agent_system_runner.run(
         request,
@@ -383,6 +399,7 @@ async def run_agent_system(
         ref=ref,
         selected_agents=selected_agents,
         execution_mode=execution_mode,
+        on_agent_result=on_agent_result,
     )
 
 

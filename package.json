@@ -1,6 +1,7 @@
 {
   "name": "trustlayer",
   "private": true,
+  "packageManager": "npm@11.9.0",
   "scripts": {
     "setup": "node scripts/setup.mjs",
     "setup:web": "node scripts/setup.mjs web",

@@ -23,7 +23,7 @@ from app.services.audit_service import AuditService
 
 class StubAuditRunner:
     def __init__(self) -> None:
-        self.started_audit_ids: list[str] = []
+        self.started_audits: list[tuple[str, str]] = []
 
     def build_initial_agents(self) -> list[AgentStatus]:
         return [
@@ -32,8 +32,8 @@ class StubAuditRunner:
             AgentStatus(name="verifier"),
         ]
 
-    def start(self, audit_id: str) -> None:
-        self.started_audit_ids.append(audit_id)
+    def start(self, audit_id: str, *, mode: str = "live") -> None:
+        self.started_audits.append((audit_id, mode))
 
 
 @asynccontextmanager
@@ -79,6 +79,18 @@ class ApiSmokeTests(unittest.TestCase):
             },
         )
 
+    def test_root_endpoint_reports_service_metadata(self) -> None:
+        response = self.client.get("/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.json(),
+            {
+                "name": "TrustLayer API",
+                "docs": "/docs",
+            },
+        )
+
     def test_create_audit_returns_created_audit(self) -> None:
         repo_url = "https://github.com/acme/platform"
 
@@ -92,7 +104,7 @@ class ApiSmokeTests(unittest.TestCase):
             [agent["name"] for agent in payload["agents"]],
             ["planner", "scanner", "verifier"],
         )
-        self.assertIn(payload["id"], self.runner.started_audit_ids)
+        self.assertIn((payload["id"], "live"), self.runner.started_audits)
 
     def test_create_demo_audit_uses_configured_demo_repo(self) -> None:
         response = self.client.post("/api/demo-audit")
@@ -101,7 +113,7 @@ class ApiSmokeTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["repo_url"], "https://github.com/example/demo-repo")
         self.assertEqual(payload["status"], "queued")
-        self.assertIn(payload["id"], self.runner.started_audit_ids)
+        self.assertIn((payload["id"], "demo"), self.runner.started_audits)
 
     def test_get_audit_returns_created_audit(self) -> None:
         created_audit = self._create_audit()

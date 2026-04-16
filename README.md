@@ -12,6 +12,7 @@ What works today:
 - shame wall page backed by stored findings
 - FastAPI endpoints for health, audits, demo audit creation, audit streaming, and wall data
 - local SQLite persistence plus seeded demo audits on backend startup
+- repo-local setup installs API dev tooling so unit tests and backend checks can run out of the box
 
 ## Repo Structure
 
@@ -98,6 +99,7 @@ If you prefer not to use npm at the repo root, use the wrapper scripts in [`scri
 Set-Location apps\web
 npm install
 npm run dev
+npm run typecheck
 ```
 
 Open `http://localhost:3000`.
@@ -108,8 +110,16 @@ Open `http://localhost:3000`.
 Set-Location apps\api
 python -m venv .venv
 . .\.venv\Scripts\Activate.ps1
-pip install -e .
+pip install -e .[dev]
 python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+Backend tests:
+
+```powershell
+Set-Location apps\api
+. .\.venv\Scripts\Activate.ps1
+python -m pytest
 ```
 
 Useful endpoints:

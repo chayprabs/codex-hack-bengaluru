@@ -66,7 +66,7 @@ function setupApi() {
     return pipExitCode;
   }
 
-  return runCommand(apiPython, ["-m", "pip", "install", "-e", "."], {
+  return runCommand(apiPython, ["-m", "pip", "install", "-e", ".[dev]"], {
     cwd: apiDir,
   });
 }

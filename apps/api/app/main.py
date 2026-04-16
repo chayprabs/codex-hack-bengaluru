@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .api.router import api_router
 from .core.config import settings
 from .core.lifespan import lifespan
+from .models import ServiceRootResponse
 
 
 def create_app() -> FastAPI:
@@ -23,9 +24,9 @@ def create_app() -> FastAPI:
 
     app.include_router(api_router)
 
-    @app.get("/")
-    def root() -> dict[str, str]:
-        return {"name": settings.app_name, "docs": "/docs"}
+    @app.get("/", response_model=ServiceRootResponse)
+    def root() -> ServiceRootResponse:
+        return ServiceRootResponse(name=settings.app_name, docs="/docs")
 
     return app
 

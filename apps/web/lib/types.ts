@@ -43,7 +43,7 @@ export type WallEntry = {
 };
 
 export type DatabaseHealth = {
-  driver: "sqlite";
+  driver: "memory" | "sqlite";
   path: string;
   ready: boolean;
 };

@@ -11,7 +11,7 @@ Local development helpers live here.
 
 From the repo root:
 
-- `npm run setup` installs web deps and bootstraps the API virtualenv
+- `npm run setup` installs web deps and bootstraps the API virtualenv with dev/test tooling
 - `npm run setup:web` installs only web dependencies
 - `npm run setup:api` bootstraps only the API virtualenv
 - `npm run dev` starts web and api together

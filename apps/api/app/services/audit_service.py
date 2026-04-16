@@ -23,7 +23,7 @@ from ..models import (
     WallEntry,
 )
 from .demo_data import build_demo_lifecycle_steps, build_seed_demo_audits
-from .audit_runner import AuditRunner
+from .audit_runner import AuditRunMode, AuditRunner
 
 
 class DemoAuditConfigurationError(RuntimeError):
@@ -42,6 +42,9 @@ class AuditService:
         self.demo_repo_url = demo_repo_url
 
     def create_audit(self, payload: CreateAuditRequest) -> Audit:
+        return self._create_audit(payload, mode="live")
+
+    def _create_audit(self, payload: CreateAuditRequest, *, mode: AuditRunMode) -> Audit:
         audit = Audit(
             id=str(uuid4()),
             repo_url=payload.repo_url,
@@ -63,7 +66,7 @@ class AuditService:
                 reason="Audit queued and waiting for the lifecycle runner to start.",
             ),
         )
-        self.runner.start(stored_audit.id)
+        self.runner.start(stored_audit.id, mode=mode)
         return stored_audit
 
     def get_audit(self, audit_id: str) -> Audit | None:
@@ -82,7 +85,7 @@ class AuditService:
             raise DemoAuditConfigurationError(
                 "The configured demo repo URL is invalid. Update DEMO_REPO_URL and try again."
             ) from exc
-        return self.create_audit(demo_request)
+        return self._create_audit(demo_request, mode="demo")
 
     def list_wall(self) -> list[WallEntry]:
         return self.repository.list_wall_entries()

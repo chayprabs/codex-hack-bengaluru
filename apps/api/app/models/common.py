@@ -7,5 +7,10 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class ServiceRootResponse(StrictModel):
+    name: str
+    docs: str
+
+
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
