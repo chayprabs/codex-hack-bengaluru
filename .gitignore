@@ -4,19 +4,16 @@ dist/
 build/
 coverage/
 logs/
-*.log
 
 .env
 .env.local
-.env.*.local
-!.env.example
-!.env.local.example
-
 .venv/
+
 __pycache__/
-*.py[cod]
-*.sqlite
-*.sqlite3
+*.pyc
 *.db
 
 .DS_Store
+
+!**/.env.example
+!**/.env.local.example
