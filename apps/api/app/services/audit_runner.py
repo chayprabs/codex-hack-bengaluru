@@ -6,7 +6,7 @@ from threading import Lock, Thread
 from time import sleep
 from typing import Literal
 
-from ..agents import AgentFinding, AgentResult
+from ..agents import AgentFinding, AgentResult, RepoWorkPlan
 from ..db import AuditRepository
 from ..core.sse import (
     publish_agent_status,
@@ -29,11 +29,13 @@ from ..models import (
     AuditCompleteEvent,
     Finding,
     FindingEvent,
+    RepoMap,
     ScoreUpdateEvent,
     utc_now,
 )
 from ..sandbox.execution_layer import ExecutionMode
 from .agent_runner import AgentExecutionMode, AgentRunResult, AgentSystemRunner, agent_system_runner
+from .audit_coverage import AuditCoverageSnapshot, audit_coverage_service
 from .audit_simulation import AuditLifecycleStep, AuditSimulationPlanBuilder, build_default_simulation_steps
 from .scoring import ScoringService, scoring_service
 
@@ -42,7 +44,14 @@ AuditRunMode = Literal["live", "demo"]
 
 @dataclass(slots=True)
 class _LiveAuditState:
+    repo_acquired: bool = False
+    planning_completed: bool = False
+    planned_specialist_agents: set[str] = field(default_factory=set)
+    repo_map: RepoMap | None = None
+    work_plan: RepoWorkPlan | None = None
     scanner_started: bool = False
+    verifier_started: bool = False
+    verifier_completed: bool = False
     specialist_results: list[AgentResult] = field(default_factory=list)
     seen_agent_findings: set[tuple[str, str, str, str]] = field(default_factory=set)
     operational_finding_keys: set[str] = field(default_factory=set)
@@ -140,6 +149,8 @@ class AuditRunner:
                 self._complete_with_workspace_limitation(audit_id, exc, state)
                 return
 
+            state.repo_acquired = True
+
             execution_status_message = "Workspace ready. Running repo mapper and planner."
             try:
                 execution_selection = self.execution_backend_resolver(mode=self.execution_backend)
@@ -225,14 +236,50 @@ class AuditRunner:
 
             if step.score_update is not None:
                 previous_score = audit.score
+                previous_coverage = audit.coverage
+                next_coverage = step.score_update.coverage if step.score_update.coverage is not None else previous_coverage
                 audit.score = step.score_update.score
+                audit.coverage = next_coverage
+                audit.coverage_percent = next_coverage
+                audit.coverage_band = self._coverage_band(next_coverage)
+                audit.coverage_summary = step.score_update.coverage_summary or self._demo_coverage_summary(next_coverage)
+                audit.confidence_limited = (
+                    step.score_update.confidence_limited
+                    if step.score_update.confidence_limited is not None
+                    else next_coverage < 55
+                )
+                if step.score_update.supported_areas is not None:
+                    audit.supported_areas = list(step.score_update.supported_areas)
+                if step.score_update.partially_supported_areas is not None:
+                    audit.partially_supported_areas = list(step.score_update.partially_supported_areas)
+                if step.score_update.unsupported_areas is not None:
+                    audit.unsupported_areas = list(step.score_update.unsupported_areas)
+                if step.score_update.scanned_files_count is not None:
+                    audit.scanned_files_count = step.score_update.scanned_files_count
+                if step.score_update.skipped_files_count is not None:
+                    audit.skipped_files_count = step.score_update.skipped_files_count
+                if step.score_update.frameworks_detected is not None:
+                    audit.frameworks_detected = list(step.score_update.frameworks_detected)
+                if step.score_update.checks_run is not None:
+                    audit.checks_run = list(step.score_update.checks_run)
+                if step.score_update.checks_skipped is not None:
+                    audit.checks_skipped = list(step.score_update.checks_skipped)
                 score_payload = {
                     "score": audit.score,
                     "previous_score": previous_score,
                     "delta": audit.score - previous_score,
+                    "coverage": audit.coverage,
+                    "previous_coverage": previous_coverage,
+                    "coverage_delta": audit.coverage - previous_coverage,
+                    "coverage_band": audit.coverage_band,
+                    "coverage_summary": audit.coverage_summary,
+                    "confidence_limited": audit.confidence_limited,
                     "reason": step.score_update.reason,
                     "updated_at": now,
                 }
+
+            if step.completion_message is not None:
+                audit.completion_message = step.completion_message
 
             return audit
 
@@ -255,9 +302,13 @@ class AuditRunner:
         if score_payload is not None:
             publish_score_update(
                 audit_id,
-                ScoreUpdateEvent(
-                    audit_id=audit_id,
-                    **score_payload,
+                ScoreUpdateEvent.from_audit(
+                    updated_audit,
+                    previous_score=score_payload["previous_score"],
+                    delta=score_payload["delta"],
+                    previous_coverage=score_payload["previous_coverage"],
+                    coverage_delta=score_payload["coverage_delta"],
+                    reason=score_payload["reason"],
                 ),
             )
 
@@ -276,16 +327,26 @@ class AuditRunner:
         state: _LiveAuditState,
     ) -> None:
         if result.agent_name == "repo_mapper":
+            state.repo_map = self._repo_map_from_result(result)
             self._set_agent_status(
                 audit_id,
                 "planner",
                 "failed" if result.status == "failed" else "running",
                 result.summary or "Repository mapping finished.",
             )
+            if result.status != "failed":
+                self._recompute_live_score(
+                    audit_id,
+                    state,
+                    reason="Repository mapping established the initial coverage baseline.",
+                )
             return
 
         if result.agent_name == "planner":
             planner_status = "failed" if result.status == "failed" else "completed"
+            state.planning_completed = result.status != "failed"
+            state.work_plan = self._work_plan_from_result(result) if state.planning_completed else None
+            state.planned_specialist_agents = self._planned_specialist_names(result) if state.planning_completed else set()
             self._set_agent_status(
                 audit_id,
                 "planner",
@@ -299,6 +360,11 @@ class AuditRunner:
                     "scanner",
                     "running",
                     "Planner finished. Starting registered agents.",
+                )
+                self._recompute_live_score(
+                    audit_id,
+                    state,
+                    reason="Planner selected the specialist checks that define current coverage.",
                 )
             return
 
@@ -346,6 +412,9 @@ class AuditRunner:
         run_result: AgentRunResult,
         state: _LiveAuditState,
     ) -> None:
+        state.repo_map = run_result.repo_map or state.repo_map
+        state.work_plan = run_result.work_plan or state.work_plan
+
         if run_result.repo_map is None or run_result.work_plan is None:
             self._record_operational_finding(
                 audit_id,
@@ -370,6 +439,7 @@ class AuditRunner:
                 "running",
                 "Closing the audit with an explicit planning limitation.",
             )
+            state.verifier_started = True
             self._recompute_live_score(
                 audit_id,
                 state,
@@ -381,6 +451,7 @@ class AuditRunner:
                 "completed",
                 "Audit completed with limited coverage because planning did not finish cleanly.",
             )
+            state.verifier_completed = True
             self._complete_audit(
                 audit_id,
                 message=(
@@ -415,6 +486,7 @@ class AuditRunner:
             "running",
             "Computing the final trust score and wrapping up the audit.",
         )
+        state.verifier_started = True
 
         final_score = self._recompute_live_score(
             audit_id,
@@ -427,6 +499,12 @@ class AuditRunner:
             "verifier",
             "completed",
             self._verifier_terminal_message(run_result, state, final_score),
+        )
+        state.verifier_completed = True
+        self._recompute_live_score(
+            audit_id,
+            state,
+            reason="Verifier locked the final TrustScore and Coverage for the report.",
         )
         self._complete_audit(
             audit_id,
@@ -468,6 +546,7 @@ class AuditRunner:
             "running",
             "Finalizing the audit with an explicit workspace limitation.",
         )
+        state.verifier_started = True
         self._recompute_live_score(
             audit_id,
             state,
@@ -478,6 +557,12 @@ class AuditRunner:
             "verifier",
             "completed",
             "Audit completed with limited coverage after workspace acquisition failed.",
+        )
+        state.verifier_completed = True
+        self._recompute_live_score(
+            audit_id,
+            state,
+            reason="Verifier finalized the report with a workspace-coverage limitation.",
         )
         self._complete_audit(
             audit_id,
@@ -581,11 +666,12 @@ class AuditRunner:
         )
         return updated_audit
 
-    def _set_score(
+    def _set_metrics(
         self,
         audit_id: str,
-        score: int,
         *,
+        score: int,
+        coverage_detail: AuditCoverageSnapshot,
         reason: str,
     ) -> Audit | None:
         emitted_event: ScoreUpdateEvent | None = None
@@ -594,15 +680,61 @@ class AuditRunner:
             nonlocal emitted_event
 
             previous_score = audit.score
-            if previous_score == score:
+            previous_coverage = audit.coverage
+            previous_detail = (
+                tuple(audit.supported_areas),
+                tuple(audit.partially_supported_areas),
+                tuple(audit.unsupported_areas),
+                audit.scanned_files_count,
+                audit.skipped_files_count,
+                tuple(audit.frameworks_detected),
+                tuple(audit.checks_run),
+                tuple(audit.checks_skipped),
+                audit.coverage_summary,
+                audit.coverage_band,
+                audit.confidence_limited,
+            )
+            next_detail = (
+                tuple(coverage_detail.supported_areas),
+                tuple(coverage_detail.partially_supported_areas),
+                tuple(coverage_detail.unsupported_areas),
+                coverage_detail.scanned_files_count,
+                coverage_detail.skipped_files_count,
+                tuple(coverage_detail.frameworks_detected),
+                tuple(coverage_detail.checks_run),
+                tuple(coverage_detail.checks_skipped),
+                coverage_detail.coverage_summary,
+                coverage_detail.coverage_band,
+                coverage_detail.confidence_limited,
+            )
+            if (
+                previous_score == score
+                and previous_coverage == coverage_detail.coverage_percent
+                and previous_detail == next_detail
+            ):
                 return audit
 
             audit.score = score
+            audit.coverage = coverage_detail.coverage_percent
+            audit.coverage_percent = coverage_detail.coverage_percent
+            audit.coverage_band = coverage_detail.coverage_band
+            audit.coverage_summary = coverage_detail.coverage_summary
+            audit.confidence_limited = coverage_detail.confidence_limited
+            audit.supported_areas = list(coverage_detail.supported_areas)
+            audit.partially_supported_areas = list(coverage_detail.partially_supported_areas)
+            audit.unsupported_areas = list(coverage_detail.unsupported_areas)
+            audit.scanned_files_count = coverage_detail.scanned_files_count
+            audit.skipped_files_count = coverage_detail.skipped_files_count
+            audit.frameworks_detected = list(coverage_detail.frameworks_detected)
+            audit.checks_run = list(coverage_detail.checks_run)
+            audit.checks_skipped = list(coverage_detail.checks_skipped)
             audit.updated_at = utc_now()
             emitted_event = ScoreUpdateEvent.from_audit(
                 audit,
                 previous_score=previous_score,
                 delta=audit.score - previous_score,
+                previous_coverage=previous_coverage,
+                coverage_delta=audit.coverage_percent - previous_coverage,
                 reason=reason,
             )
             return audit
@@ -690,16 +822,26 @@ class AuditRunner:
         *,
         reason: str,
     ) -> int:
-        summary = self.scorer.summarize(
+        trust_score = self.scorer.score(
             findings=state.operational_findings,
             agent_results=state.specialist_results,
         )
-        self._set_score(
+        audit = self.repository.get_audit(audit_id)
+        audit_status = "completed" if state.verifier_completed else audit.status if audit is not None else "running"
+        coverage_detail = audit_coverage_service.assess(
+            audit_status=audit_status,
+            repo_map=state.repo_map,
+            work_plan=state.work_plan,
+            specialist_results=state.specialist_results,
+            limitations_count=len(state.operational_findings),
+        )
+        self._set_metrics(
             audit_id,
-            summary.current_score,
+            score=trust_score.score,
+            coverage_detail=coverage_detail,
             reason=reason,
         )
-        return summary.current_score
+        return trust_score.score
 
     @staticmethod
     def _agent_finding_key(finding: AgentFinding) -> tuple[str, str, str, str]:
@@ -713,6 +855,54 @@ class AuditRunner:
     @staticmethod
     def _display_agent_name(agent_name: str) -> str:
         return agent_name.replace("_", " ").title()
+
+    @staticmethod
+    def _planned_specialist_names(result: AgentResult) -> set[str]:
+        work_plan = AuditRunner._work_plan_from_result(result)
+        if work_plan is None:
+            return set()
+        return {assignment.agent_name for assignment in work_plan.assignments if assignment.status == "planned"}
+
+    @staticmethod
+    def _repo_map_from_result(result: AgentResult) -> RepoMap | None:
+        raw_repo_map = result.metadata.get("repo_map")
+        if raw_repo_map is None or result.status == "failed":
+            return None
+        try:
+            return RepoMap.model_validate(raw_repo_map)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _work_plan_from_result(result: AgentResult) -> RepoWorkPlan | None:
+        raw_work_plan = result.metadata.get("work_plan")
+        if raw_work_plan is None or result.status == "failed":
+            return None
+        try:
+            return RepoWorkPlan.model_validate(raw_work_plan)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _coverage_band(score: int) -> str:
+        if score >= 85:
+            return "deep"
+        if score >= 70:
+            return "broad"
+        if score >= 55:
+            return "targeted"
+        if score >= 30:
+            return "limited"
+        return "minimal"
+
+    @staticmethod
+    def _demo_coverage_summary(score: int) -> str:
+        band = AuditRunner._coverage_band(score)
+        if score < 55:
+            return (
+                f"Coverage is {score}/100 ({band}). Confidence is limited until repository access, specialist execution, and verification close out."
+            )
+        return f"Coverage is {score}/100 ({band}) across repository access, specialist checks, and verifier review."
 
     def _specialist_progress_message(self, result: AgentResult) -> str:
         status_label = {

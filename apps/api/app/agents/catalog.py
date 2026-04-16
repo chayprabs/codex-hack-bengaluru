@@ -158,6 +158,7 @@ SPECIALIST_ROSTER: list[SpecialistDefinition] = [
             SpecialistCheckDefinition(id="git_dependency", summary="Detect git, URL, or editable dependency sources."),
             SpecialistCheckDefinition(id="install_script_review", summary="Review install lifecycle scripts."),
             SpecialistCheckDefinition(id="remote_install_script", summary="Detect lifecycle scripts that fetch remote code."),
+            SpecialistCheckDefinition(id="high_risk_dependency", summary="Detect curated stale or historically risky dependency packages."),
             SpecialistCheckDefinition(id="invalid_manifest", summary="Detect invalid dependency manifests."),
         ],
         evidence_returns=[
@@ -183,6 +184,7 @@ SPECIALIST_ROSTER: list[SpecialistDefinition] = [
         checks=[
             SpecialistCheckDefinition(id="wildcard_cors_with_credentials", summary="Detect wildcard CORS origins paired with credentials."),
             SpecialistCheckDefinition(id="reflective_cors_origin", summary="Detect reflective or overly broad CORS origin config."),
+            SpecialistCheckDefinition(id="debug_enabled_in_production_config", summary="Detect debug or development mode enabled in production-facing config."),
             SpecialistCheckDefinition(id="security_headers_disabled", summary="Detect explicitly disabled security headers."),
             SpecialistCheckDefinition(id="missing_security_headers_review", summary="Review apps without obvious header hardening markers."),
         ],
@@ -210,10 +212,17 @@ SPECIALIST_ROSTER: list[SpecialistDefinition] = [
             SpecialistCheckDefinition(id="raw_request_parsing_without_validation", summary="Review request parsing without obvious schema validation."),
             SpecialistCheckDefinition(id="weak_body_type", summary="Detect `dict` or `Any` payloads on route handlers."),
             SpecialistCheckDefinition(id="missing_schema_validation_review", summary="Review body, params, or query usage without obvious validation markers."),
+            SpecialistCheckDefinition(id="unsafe_eval", summary="Detect backend `eval(...)` usage."),
+            SpecialistCheckDefinition(id="unsafe_exec", summary="Detect backend `exec(...)` or exec-style process helpers."),
+            SpecialistCheckDefinition(id="subprocess_shell_true", summary="Detect subprocess calls that enable `shell=True`."),
+            SpecialistCheckDefinition(id="raw_sql_string_concatenation", summary="Detect raw SQL string interpolation instead of parameter binding."),
+            SpecialistCheckDefinition(id="unsafe_yaml_load", summary="Detect `yaml.load(...)` or `yaml.unsafe_load(...)` on backend code paths."),
+            SpecialistCheckDefinition(id="unsafe_pickle_load", summary="Detect `pickle.loads(...)` or similar unsafe deserialization helpers."),
         ],
         evidence_returns=[
             "Route excerpt showing request parsing",
             "Validation-marker absence or schema evidence",
+            "Exact sink line for eval, exec, shell, SQL, or deserialization hazards",
             "Line-level handler locator",
         ],
         patch_suggestion_shape=PatchSuggestionShape(
@@ -234,8 +243,9 @@ SPECIALIST_ROSTER: list[SpecialistDefinition] = [
         checks=[
             SpecialistCheckDefinition(id="public_secret_exposure", summary="Detect secret-like public env names."),
             SpecialistCheckDefinition(id="service_role_in_frontend", summary="Detect service-role secrets referenced from browser code."),
+            SpecialistCheckDefinition(id="hardcoded_client_token", summary="Detect hardcoded tokens, bearer values, or API keys in frontend source."),
             SpecialistCheckDefinition(id="token_storage", summary="Detect auth state stored in browser storage."),
-            SpecialistCheckDefinition(id="unsafe_html_sink", summary="Review direct HTML injection sinks."),
+            SpecialistCheckDefinition(id="unsafe_html_sink", summary="Review direct HTML injection or unsafe HTML rendering sinks."),
             SpecialistCheckDefinition(id="unsafe_eval", summary="Detect eval-like runtime execution in frontend code."),
         ],
         evidence_returns=[
@@ -263,6 +273,7 @@ SPECIALIST_ROSTER: list[SpecialistDefinition] = [
             SpecialistCheckDefinition(id="build_failed", summary="Detect failing scoped build commands."),
             SpecialistCheckDefinition(id="test_failed", summary="Detect failing scoped test commands."),
             SpecialistCheckDefinition(id="python_compile_failed", summary="Detect failing Python compile checks."),
+            SpecialistCheckDefinition(id="missing_env_example", summary="Detect project roots that use env configuration but lack a checked-in example env template."),
             SpecialistCheckDefinition(id="missing_lint_script", summary="Detect lintable projects without a lint script."),
             SpecialistCheckDefinition(id="missing_typescript_dependency", summary="Detect tsconfig without TypeScript support."),
             SpecialistCheckDefinition(id="lint_failed", summary="Detect failing lint commands."),

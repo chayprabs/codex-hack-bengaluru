@@ -14,9 +14,13 @@ PlannerAgentName = Literal[
     "secrets",
     "buildbreak",
     "typelint",
+    "build_type_lint",
     "auth",
+    "authz",
     "webhook",
     "dependency",
+    "config_headers_cors",
+    "input_validation",
     "frontend_runtime",
     "api_contract",
 ]
@@ -40,6 +44,32 @@ WEBHOOK_TOKENS = {
     "discord",
     "svix",
     "twilio",
+}
+CONFIG_SECURITY_TOKENS = {
+    "cors",
+    "origin",
+    "origins",
+    "headers",
+    "header",
+    "helmet",
+    "csp",
+    "content-security-policy",
+    "trustedhost",
+    "middleware",
+    "security",
+}
+VALIDATION_TOKENS = {
+    "schema",
+    "schemas",
+    "validator",
+    "validators",
+    "validation",
+    "dto",
+    "dtos",
+    "zod",
+    "joi",
+    "pydantic",
+    "marshmallow",
 }
 FRONTEND_ROOT_TOKENS = {"web", "site", "frontend", "client", "ui"}
 BACKEND_ROOT_TOKENS = {"api", "backend", "server", "svc"}
@@ -112,13 +142,14 @@ class RepoPlanner:
 
         assignments = [
             self._build_secrets_plan(normalized, indexed),
-            self._build_buildbreak_plan(normalized, indexed),
-            self._build_typelint_plan(normalized, indexed),
             self._build_auth_plan(normalized, indexed),
+            self._build_authz_plan(normalized, indexed),
             self._build_webhook_plan(normalized, indexed),
             self._build_dependency_plan(normalized, indexed),
+            self._build_config_headers_cors_plan(normalized, indexed),
+            self._build_input_validation_plan(normalized, indexed),
             self._build_frontend_runtime_plan(normalized, indexed),
-            self._build_api_contract_plan(normalized, indexed),
+            self._build_build_type_lint_plan(normalized, indexed),
         ]
 
         return RepoWorkPlan(
@@ -139,6 +170,10 @@ class RepoPlanner:
         files.extend(self._wrap("routes", repo_map.key_files.routes))
         files.extend(self._wrap("auth", repo_map.key_files.auth))
         files.extend(self._wrap("database", repo_map.key_files.database))
+        files.extend(self._wrap("middleware", repo_map.key_files.middleware))
+        files.extend(self._wrap("validation", repo_map.key_files.validation))
+        files.extend(self._wrap("webhooks", repo_map.key_files.webhooks))
+        files.extend(self._wrap("frontend", repo_map.key_files.frontend))
         files.extend(self._wrap("env", repo_map.key_files.env))
         files.extend(self._wrap("config", repo_map.key_files.config))
         files.extend(self._wrap("manifests", repo_map.key_files.manifests))
@@ -159,7 +194,7 @@ class RepoPlanner:
         )
         webhook_files = self._pick_files(
             indexed,
-            categories=("routes",),
+            categories=("webhooks", "routes"),
             include=self._is_webhook_related,
         )
         file_targets = self._unique_files(base_files + webhook_files)
@@ -226,7 +261,7 @@ class RepoPlanner:
     ) -> PlannerAssignment:
         auth_files = self._pick_files(
             indexed,
-            categories=("auth", "routes", "env", "config"),
+            categories=("auth", "routes", "middleware", "env", "config"),
             include=self._is_auth_related,
         )
         root_targets = self._root_targets(auth_files, reason="slice with auth or policy signals")
@@ -238,6 +273,25 @@ class RepoPlanner:
             planned="Inspect mapped auth surfaces instead of broad repo-wide access checks.",
         )
 
+    def _build_authz_plan(
+        self,
+        repo_map: RepoMap,
+        indexed: list[_IndexedFile],
+    ) -> PlannerAssignment:
+        authz_files = self._pick_files(
+            indexed,
+            categories=("auth", "routes", "database", "validation"),
+            include=self._is_auth_related,
+        )
+        root_targets = self._root_targets(authz_files, reason="slice with authz or object-access signals")
+        targets = self._combine_targets(root_targets, self._file_targets(authz_files))
+        return self._assignment(
+            "authz",
+            targets,
+            fallback="No clear authz or object-access files were mapped.",
+            planned="Inspect mapped authz helpers, sensitive routes, and object-access files only.",
+        )
+
     def _build_webhook_plan(
         self,
         repo_map: RepoMap,
@@ -245,7 +299,7 @@ class RepoPlanner:
     ) -> PlannerAssignment:
         webhook_files = self._pick_files(
             indexed,
-            categories=("routes", "auth", "env", "config"),
+            categories=("webhooks", "routes", "auth", "env", "config"),
             include=self._is_webhook_related,
         )
         root_targets = self._root_targets(webhook_files, reason="slice with webhook or callback signals")
@@ -275,6 +329,44 @@ class RepoPlanner:
             planned="Review only mapped dependency manifests, lockfiles, and package roots.",
         )
 
+    def _build_config_headers_cors_plan(
+        self,
+        repo_map: RepoMap,
+        indexed: list[_IndexedFile],
+    ) -> PlannerAssignment:
+        config_files = self._pick_files(
+            indexed,
+            categories=("middleware", "config", "env", "routes"),
+            include=self._is_config_security_related,
+        )
+        root_targets = self._root_targets(config_files, reason="slice with CORS, headers, or security middleware")
+        targets = self._combine_targets(root_targets, self._file_targets(config_files))
+        return self._assignment(
+            "config_headers_cors",
+            targets,
+            fallback="No config, middleware, or CORS-specific files were mapped.",
+            planned="Inspect mapped config and middleware files for headers and CORS risks only.",
+        )
+
+    def _build_input_validation_plan(
+        self,
+        repo_map: RepoMap,
+        indexed: list[_IndexedFile],
+    ) -> PlannerAssignment:
+        validation_files = self._pick_files(
+            indexed,
+            categories=("validation", "routes", "auth", "database"),
+            include=self._is_validation_related,
+        )
+        root_targets = self._root_targets(validation_files, reason="slice with request parsing or validation signals")
+        targets = self._combine_targets(root_targets, self._file_targets(validation_files))
+        return self._assignment(
+            "input_validation",
+            targets,
+            fallback="No request validation or schema files were mapped.",
+            planned="Inspect mapped validators, request handlers, and nearby data-access files only.",
+        )
+
     def _build_frontend_runtime_plan(
         self,
         repo_map: RepoMap,
@@ -282,7 +374,7 @@ class RepoPlanner:
     ) -> PlannerAssignment:
         frontend_files = self._pick_files(
             indexed,
-            categories=("manifests", "lockfiles", "config", "auth", "routes", "env"),
+            categories=("frontend", "manifests", "lockfiles", "config", "auth", "routes", "env"),
             include=self._is_frontend_related,
         )
         frontend_roots = self._root_targets(frontend_files, reason="frontend app slice")
@@ -299,6 +391,32 @@ class RepoPlanner:
             targets,
             fallback="No frontend framework or frontend file slice was mapped.",
             planned="Check mapped frontend app roots, config, and route surfaces only.",
+        )
+
+    def _build_build_type_lint_plan(
+        self,
+        repo_map: RepoMap,
+        indexed: list[_IndexedFile],
+    ) -> PlannerAssignment:
+        typed_files = self._pick_files(
+            indexed,
+            categories=("manifests", "lockfiles", "config", "routes", "validation"),
+            include=self._is_typelint_candidate,
+        )
+        typed_roots = self._root_targets(typed_files, reason="build, type, or lint-relevant source slice")
+        targets = self._combine_targets(typed_roots, self._file_targets(typed_files))
+        if not targets and not any(language in {"python", "typescript", "javascript"} for language in repo_map.languages):
+            return self._assignment(
+                "build_type_lint",
+                [],
+                fallback="No buildable or typed-language surfaces were mapped.",
+                planned="",
+            )
+        return self._assignment(
+            "build_type_lint",
+            targets,
+            fallback="No buildable or typed-language surfaces were mapped.",
+            planned="Run scoped build, test, lint, and type checks against the mapped project roots only.",
         )
 
     def _build_api_contract_plan(
@@ -441,7 +559,19 @@ class RepoPlanner:
         return self._path_has_token(item.path, AUTH_TOKENS)
 
     def _is_webhook_related(self, item: _IndexedFile) -> bool:
+        if item.category == "webhooks":
+            return True
         return self._path_has_token(item.path, WEBHOOK_TOKENS)
+
+    def _is_config_security_related(self, item: _IndexedFile) -> bool:
+        if item.category in {"middleware", "config"}:
+            return True
+        return self._path_has_token(item.path, CONFIG_SECURITY_TOKENS)
+
+    def _is_validation_related(self, item: _IndexedFile) -> bool:
+        if item.category == "validation":
+            return True
+        return self._path_has_token(item.path, VALIDATION_TOKENS)
 
     def _path_has_token(self, path: str, tokens: set[str]) -> bool:
         lower = path.lower()

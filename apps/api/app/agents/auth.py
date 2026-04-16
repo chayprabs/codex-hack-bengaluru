@@ -21,6 +21,7 @@ AuthFindingKind = Literal[
     "auth_disabled_flag",
     "insecure_auth_default",
     "jwt_verification_bypass",
+    "insecure_session_cookie",
     "suspicious_unprotected_route",
 ]
 
@@ -74,6 +75,10 @@ JWT_BYPASS_RE = re.compile(
     r"verify_signature\s*[:=]\s*false|algorithms?\s*=\s*\[[^\]]*['\"]none['\"]|jwt\.decode\([^)]*verify\s*=\s*false",
     re.IGNORECASE,
 )
+INSECURE_SESSION_COOKIE_RE = re.compile(
+    r"(?:httponly|http_only|secure)\s*[:=]\s*(?:false|0)|samesite\s*[:=]\s*['\"]none['\"]",
+    re.IGNORECASE,
+)
 
 
 class AuthAgentError(ValueError):
@@ -104,6 +109,7 @@ class AuthAgent(BaseAgent):
 
     name = "auth"
     description = "Looks for authentication bypasses, insecure defaults, and weak auth coverage signals."
+    repo_map_inputs = ("auth", "routes", "env", "config", "middleware")
 
     def __init__(self, *, max_files: int = 60, max_findings: int = 20) -> None:
         self.max_files = max_files
@@ -120,10 +126,35 @@ class AuthAgent(BaseAgent):
                 title=item.title,
                 summary=item.description,
                 severity=item.severity,
+                confidence=item.confidence,
                 file_path=item.file_path,
                 line_start=item.line_start,
                 line_end=item.line_start,
                 rule_id=item.kind,
+                category=self.agent_name,
+                inputs=self.repo_map_inputs,
+                checks=[item.kind],
+                evidence=[
+                    self.evidence(
+                        kind="code",
+                        summary=item.title,
+                        file_path=item.file_path,
+                        line_start=item.line_start,
+                        line_end=item.line_start,
+                        excerpt=item.evidence_excerpt or None,
+                    )
+                ],
+                patch_suggestion=self.patch_suggestion(
+                    strategy=self._patch_strategy(item.kind),
+                    summary=item.suggested_remediation,
+                    changes=[
+                        self.patch_change(
+                            file_path=item.file_path,
+                            summary=item.suggested_remediation,
+                            action="review" if item.confidence == "low" else "edit",
+                        )
+                    ],
+                ),
                 metadata={
                     "confidence": item.confidence,
                     "evidence_excerpt": item.evidence_excerpt,
@@ -149,7 +180,7 @@ class AuthAgent(BaseAgent):
         targets = resolve_agent_targets(
             context,
             agent_names=("auth",),
-            repo_map_categories=("auth", "routes", "env", "config"),
+            repo_map_categories=("auth", "routes", "env", "config", "middleware"),
             fallback_to_root=False,
         )
         targets = [target for target in targets if not should_skip_analysis_path(target.display_path)]
@@ -233,6 +264,23 @@ class AuthAgent(BaseAgent):
                 ),
                 suggested_remediation=(
                     "Enforce signature verification with explicit trusted algorithms and remove bypass flags."
+                ),
+            )
+        )
+        findings.extend(
+            self._line_matches(
+                relative_path,
+                text,
+                INSECURE_SESSION_COOKIE_RE,
+                kind="insecure_session_cookie",
+                severity="medium",
+                confidence="medium",
+                title="Session cookie settings look insecure",
+                description=(
+                    "This file appears to disable `HttpOnly` or `Secure`, or it uses `SameSite=None` without any visible accompanying hardening."
+                ),
+                suggested_remediation=(
+                    "Use `HttpOnly`, `Secure`, and a deliberate `SameSite` policy for session cookies unless a documented cross-site flow requires otherwise."
                 ),
             )
         )
@@ -324,6 +372,13 @@ class AuthAgent(BaseAgent):
             f"Scanned {report.scanned_files} auth-related files and produced {len(report.findings)} findings, "
             f"including {high_confidence} higher-confidence authentication signals."
         )
+
+    def _patch_strategy(self, kind: AuthFindingKind) -> str:
+        if kind == "suspicious_unprotected_route":
+            return "manual_review"
+        if kind in {"insecure_auth_default", "insecure_session_cookie"}:
+            return "tighten_config"
+        return "add_guard"
 
 
 async def run(context: AgentContext) -> AgentResult:

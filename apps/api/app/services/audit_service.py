@@ -63,6 +63,8 @@ class AuditService:
                 stored_audit,
                 previous_score=stored_audit.score,
                 delta=0,
+                previous_coverage=stored_audit.coverage,
+                coverage_delta=0,
                 reason="Audit queued and waiting for the lifecycle runner to start.",
             ),
         )
@@ -128,6 +130,8 @@ class AuditService:
                     audit,
                     previous_score=audit.score,
                     delta=0,
+                    previous_coverage=audit.coverage,
+                    coverage_delta=0,
                     reason="Current audit score snapshot.",
                 ),
                 event_id=f"{audit.id}:snapshot:score",

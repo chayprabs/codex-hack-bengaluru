@@ -4,13 +4,35 @@ from .api_contract import ApiContractAgent, ApiContractAgentError, ApiContractFi
 from .auth import AuthAgent, AuthAgentError, AuthFinding, AuthReport
 from .authz import AuthzAgent, AuthzAgentError, AuthzFinding, AuthzReport
 from .base import BaseAgent
+from .build_type_lint import BuildTypeLintAgent
 from .buildbreak import BuildbreakAgent, BuildbreakAgentError, BuildbreakFinding, BuildbreakReport
+from .catalog import (
+    PatchSuggestionShape,
+    SpecialistCheckDefinition,
+    SpecialistDefinition,
+    SPECIALIST_ROSTER,
+    shared_finding_schema,
+    specialist_definition,
+    specialist_roster,
+)
+from .config_headers_cors import (
+    ConfigHeadersCorsAgent,
+    ConfigHeadersCorsAgentError,
+    ConfigHeadersCorsFinding,
+    ConfigHeadersCorsReport,
+)
 from .dependency import DependencyAgent, DependencyAgentError, DependencyFinding, DependencyReport
 from .frontend_runtime import (
     FrontendRuntimeAgent,
     FrontendRuntimeAgentError,
     FrontendRuntimeFinding,
     FrontendRuntimeReport,
+)
+from .input_validation import (
+    InputValidationAgent,
+    InputValidationAgentError,
+    InputValidationFinding,
+    InputValidationReport,
 )
 from .planner import (
     PlannerAgent,
@@ -38,8 +60,13 @@ from .types import (
     AgentFinding,
     AgentResult,
     AgentResultStatus,
+    FindingEvidence,
+    FindingEvidenceKind,
     FindingConfidence,
     FindingSeverity,
+    PatchSuggestion,
+    PatchSuggestionChange,
+    PatchSuggestionStrategy,
 )
 from .webhook import WebhookAgent, WebhookAgentError, WebhookFinding, WebhookReport
 
@@ -49,13 +76,16 @@ def _register_default_agents() -> None:
         RepoMapperAgent(),
         PlannerAgent(),
         SecretsAgent(),
-        BuildbreakAgent(),
-        TypeLintAgent(),
         AuthAgent(),
         AuthzAgent(),
         WebhookAgent(),
         DependencyAgent(),
+        ConfigHeadersCorsAgent(),
+        InputValidationAgent(),
         FrontendRuntimeAgent(),
+        BuildTypeLintAgent(),
+        BuildbreakAgent(),
+        TypeLintAgent(),
         ApiContractAgent(),
     ):
         if agent.agent_name in agent_registry:
@@ -89,16 +119,31 @@ __all__ = [
     "BuildbreakAgentError",
     "BuildbreakFinding",
     "BuildbreakReport",
+    "BuildTypeLintAgent",
+    "ConfigHeadersCorsAgent",
+    "ConfigHeadersCorsAgentError",
+    "ConfigHeadersCorsFinding",
+    "ConfigHeadersCorsReport",
     "DependencyAgent",
     "DependencyAgentError",
     "DependencyFinding",
     "DependencyReport",
+    "FindingEvidence",
+    "FindingEvidenceKind",
     "FindingConfidence",
     "FindingSeverity",
     "FrontendRuntimeAgent",
     "FrontendRuntimeAgentError",
     "FrontendRuntimeFinding",
     "FrontendRuntimeReport",
+    "InputValidationAgent",
+    "InputValidationAgentError",
+    "InputValidationFinding",
+    "InputValidationReport",
+    "PatchSuggestion",
+    "PatchSuggestionChange",
+    "PatchSuggestionShape",
+    "PatchSuggestionStrategy",
     "PlannerAgent",
     "PlannerAssignment",
     "PlannerError",
@@ -117,6 +162,9 @@ __all__ = [
     "SecretScanReport",
     "SecretsAgent",
     "SecretsAgentError",
+    "SPECIALIST_ROSTER",
+    "SpecialistCheckDefinition",
+    "SpecialistDefinition",
     "TypeLintAgent",
     "TypeLintAgentError",
     "TypeLintFinding",
@@ -126,4 +174,7 @@ __all__ = [
     "WebhookFinding",
     "WebhookReport",
     "agent_registry",
+    "shared_finding_schema",
+    "specialist_definition",
+    "specialist_roster",
 ]

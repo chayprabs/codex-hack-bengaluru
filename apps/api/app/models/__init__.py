@@ -6,6 +6,7 @@ from .audit import (
     Audit,
     AuditState,
     AuditStreamEventName,
+    CoverageBand,
     CreateAuditRequest,
     Finding,
     FindingSeverity,
@@ -13,6 +14,16 @@ from .audit import (
 )
 from .common import ServiceRootResponse, utc_now
 from .health import DatabaseHealth, HealthCheckResponse
+from .repo_map import (
+    RepoMap,
+    RepoMapFile,
+    RepoMapFolder,
+    RepoMapKeyFiles,
+    RepoMapPackageManager,
+    RepoMapScan,
+    RepoMapStack,
+    RepoMapZone,
+)
 from .stream import (
     AgentStatusEvent,
     AuditCompleteEvent,
@@ -30,12 +41,21 @@ __all__ = [
     "AuditState",
     "AuditStreamEventData",
     "AuditStreamEventName",
+    "CoverageBand",
     "CreateAuditRequest",
     "DatabaseHealth",
     "Finding",
     "FindingEvent",
     "FindingSeverity",
     "HealthCheckResponse",
+    "RepoMap",
+    "RepoMapFile",
+    "RepoMapFolder",
+    "RepoMapKeyFiles",
+    "RepoMapPackageManager",
+    "RepoMapScan",
+    "RepoMapStack",
+    "RepoMapZone",
     "ScoreUpdateEvent",
     "ServiceRootResponse",
     "WallEntry",

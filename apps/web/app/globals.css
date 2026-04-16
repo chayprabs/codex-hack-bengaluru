@@ -23,3 +23,50 @@ body {
   color: #081018;
   background: rgba(94, 234, 212, 0.45);
 }
+
+@keyframes storyPulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+
+  50% {
+    transform: scale(1.08);
+    opacity: 0.84;
+  }
+}
+
+@keyframes storyGlow {
+  0% {
+    box-shadow: 0 0 0 0 rgba(14, 165, 233, 0.18);
+  }
+
+  100% {
+    box-shadow: 0 0 0 10px rgba(14, 165, 233, 0);
+  }
+}
+
+@keyframes tracePanelEnter {
+  0% {
+    opacity: 0;
+    transform: translateX(28px);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.story-pulse {
+  animation: storyPulse 1.8s ease-in-out infinite;
+}
+
+.story-card-live {
+  animation: storyGlow 2.4s ease-out infinite;
+}
+
+.trace-panel-enter {
+  animation: tracePanelEnter 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}

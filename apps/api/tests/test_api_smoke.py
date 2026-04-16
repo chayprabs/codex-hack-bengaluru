@@ -16,7 +16,7 @@ from starlette.requests import Request
 
 from app.db import DatabaseRuntime
 from app.main import create_app
-from app.models import AgentStatus
+from app.models import AgentStatus, Audit, Finding
 from app.routes.audits import stream_audit
 from app.services.audit_service import AuditService
 
@@ -106,6 +106,26 @@ class ApiSmokeTests(unittest.TestCase):
         )
         self.assertIn((payload["id"], "live"), self.runner.started_audits)
 
+    def test_create_audit_normalizes_supported_github_repo_urls(self) -> None:
+        response = self.client.post(
+            "/api/audits",
+            json={"repo_url": "https://www.github.com/acme/platform.git"},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.json()["repo_url"], "https://github.com/acme/platform")
+
+    def test_create_audit_rejects_non_github_repo_urls(self) -> None:
+        response = self.client.post(
+            "/api/audits",
+            json={"repo_url": "https://example.com/acme/platform"},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_422_UNPROCESSABLE_CONTENT)
+        payload = response.json()
+        self.assertIn("detail", payload)
+        self.assertIn("github.com", payload["detail"][0]["msg"].lower())
+
     def test_create_demo_audit_uses_configured_demo_repo(self) -> None:
         response = self.client.post("/api/demo-audit")
 
@@ -152,6 +172,41 @@ class ApiSmokeTests(unittest.TestCase):
         self.assertEqual(response.headers["x-accel-buffering"], "no")
         self.assertIn(f'"audit_id":"{created_audit["id"]}"', first_chunk)
         self.assertIn("event: agent_status", first_chunk)
+
+    def test_wall_endpoint_returns_flattened_finding_entries(self) -> None:
+        audit = Audit(
+            id="wall-audit",
+            repo_url="https://github.com/acme/example",
+            status="completed",
+            score=82,
+            agents=self.runner.build_initial_agents(),
+            findings=[
+                Finding(
+                    severity="high",
+                    title="Unsigned webhook path",
+                    summary="Webhook processing starts before trust is established.",
+                    file_path="app/routes/webhooks.py",
+                    line=24,
+                )
+            ],
+        )
+        self.runtime.audit_repository.create_audit(audit)
+
+        response = self.client.get("/api/wall")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.json(),
+            [
+                {
+                    "audit_id": "wall-audit",
+                    "repo_url": "https://github.com/acme/example",
+                    "title": "Unsigned webhook path",
+                    "severity": "high",
+                    "created_at": audit.findings[0].created_at.isoformat().replace("+00:00", "Z"),
+                }
+            ],
+        )
 
     def _create_audit(self) -> dict[str, Any]:
         response = self.client.post(

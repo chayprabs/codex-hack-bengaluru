@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 from pathlib import Path
-import re
 import shutil
 import tomllib
 from typing import Any, Literal
@@ -83,6 +82,7 @@ class BuildbreakAgent(BaseAgent):
 
     name = "buildbreak"
     description = "Checks manifests, scripts, and scoped build/test commands for obvious breakage."
+    repo_map_inputs = ("manifests", "lockfiles", "config", "routes", "validation")
 
     def __init__(
         self,
@@ -106,6 +106,29 @@ class BuildbreakAgent(BaseAgent):
                 severity=item.severity,
                 file_path=item.file_path,
                 rule_id=item.kind,
+                category="build_type_lint",
+                inputs=self.repo_map_inputs,
+                checks=[item.kind],
+                evidence=[
+                    self.evidence(
+                        kind="command" if item.command_label else "manifest",
+                        summary=item.title,
+                        file_path=item.file_path,
+                        excerpt=item.evidence_excerpt or None,
+                        locator=item.command_label,
+                    )
+                ],
+                patch_suggestion=self.patch_suggestion(
+                    strategy="repair_build",
+                    summary=item.suggested_remediation,
+                    changes=[
+                        self.patch_change(
+                            file_path=item.file_path or ".",
+                            summary=item.suggested_remediation,
+                            action="review" if item.command_label else "edit",
+                        )
+                    ],
+                ),
                 metadata={
                     "description": item.description,
                     "command_label": item.command_label,

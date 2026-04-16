@@ -73,6 +73,7 @@ class WebhookAgent(BaseAgent):
 
     name = "webhook"
     description = "Looks for webhook verification gaps and weak idempotency signals in mapped webhook slices."
+    repo_map_inputs = ("webhooks", "routes", "auth", "config", "env")
 
     def __init__(self, *, max_files: int = 50, max_findings: int = 20) -> None:
         self.max_files = max_files
@@ -89,10 +90,35 @@ class WebhookAgent(BaseAgent):
                 title=item.title,
                 summary=item.description,
                 severity=item.severity,
+                confidence=item.confidence,
                 file_path=item.file_path,
                 line_start=item.line_start,
                 line_end=item.line_start,
                 rule_id=item.kind,
+                category=self.agent_name,
+                inputs=self.repo_map_inputs,
+                checks=[item.kind],
+                evidence=[
+                    self.evidence(
+                        kind="route",
+                        summary=item.title,
+                        file_path=item.file_path,
+                        line_start=item.line_start,
+                        line_end=item.line_start,
+                        excerpt=item.evidence_excerpt or None,
+                    )
+                ],
+                patch_suggestion=self.patch_suggestion(
+                    strategy=self._patch_strategy(item.kind),
+                    summary=item.suggested_remediation,
+                    changes=[
+                        self.patch_change(
+                            file_path=item.file_path,
+                            summary=item.suggested_remediation,
+                            action="review" if item.confidence == "low" else "edit",
+                        )
+                    ],
+                ),
                 metadata={
                     "confidence": item.confidence,
                     "evidence_excerpt": item.evidence_excerpt,
@@ -117,7 +143,7 @@ class WebhookAgent(BaseAgent):
         targets = resolve_agent_targets(
             context,
             agent_names=("webhook",),
-            repo_map_categories=("routes", "auth", "config"),
+            repo_map_categories=("webhooks", "routes", "auth", "config"),
             repo_map_filter=lambda file: any(hint in file.path.lower() for hint in ("webhook", "callback", "stripe", "svix", "slack")),
             fallback_to_root=False,
         )
@@ -291,6 +317,11 @@ class WebhookAgent(BaseAgent):
             f"Scanned {report.scanned_files} webhook-related files and produced {len(report.findings)} findings, "
             "keeping absence-based signals as review prompts."
         )
+
+    def _patch_strategy(self, kind: WebhookFindingKind) -> str:
+        if kind == "missing_idempotency_review":
+            return "manual_review"
+        return "add_guard"
 
 
 async def run(context: AgentContext) -> AgentResult:

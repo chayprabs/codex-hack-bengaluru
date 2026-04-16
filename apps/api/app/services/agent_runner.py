@@ -29,16 +29,17 @@ AgentResultCallback = Callable[[AgentResult], None]
 
 DEFAULT_SPECIALIST_ORDER = (
     "secrets",
-    "dependency",
     "auth",
     "authz",
     "webhook",
+    "dependency",
+    "config_headers_cors",
+    "input_validation",
     "frontend_runtime",
+    "build_type_lint",
     "api_contract",
-    "buildbreak",
-    "typelint",
 )
-EXECUTION_OPTIONAL_AGENTS = frozenset({"buildbreak", "typelint"})
+EXECUTION_OPTIONAL_AGENTS = frozenset({"buildbreak", "typelint", "build_type_lint"})
 ORCHESTRATION_AGENTS = frozenset({"repo_mapper", "planner"})
 SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3}
 
@@ -293,7 +294,7 @@ class AgentSystemRunner:
         selected: list[str] = []
         for name in DEFAULT_SPECIALIST_ORDER:
             if name == "authz":
-                should_run = "auth" in planned_agents
+                should_run = "authz" in planned_agents or "auth" in planned_agents
             else:
                 should_run = name in planned_agents
             if should_run:

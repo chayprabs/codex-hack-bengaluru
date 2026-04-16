@@ -8,8 +8,6 @@ import { useState, useTransition } from "react";
 import { apiClient, getApiErrorMessage } from "@/lib/api";
 import { cn, isGithubRepoUrl } from "@/lib/utils";
 
-const DEMO_REPO_URL = "https://github.com/vercel/next.js";
-
 const stats = [
   { label: "Kickoff Time", value: "< 60 sec", detail: "From repo paste to visible audit room." },
   { label: "Review Tracks", value: "3 lanes", detail: "Planner, scanner, and verifier lanes in the live room." },
@@ -27,7 +25,7 @@ export function HomePage() {
     message: string;
   }>({
     tone: "neutral",
-    message: "Paste a GitHub repo URL to launch an audit room backed by the current API scaffold.",
+    message: "Paste a public GitHub repo root like https://github.com/org/repo to launch a live audit room.",
   });
 
   const trimmedUrl = repoUrl.trim();
@@ -46,7 +44,8 @@ export function HomePage() {
     if (!isValidRepoUrl) {
       setFeedback({
         tone: "error",
-        message: "That does not look like a GitHub repo URL yet. Try something like https://github.com/org/repo.",
+        message:
+          "That repo URL does not match the live audit contract yet. Use an https GitHub repo root like https://github.com/org/repo.",
       });
       return;
     }
@@ -77,11 +76,10 @@ export function HomePage() {
   }
 
   async function handleDemoClick() {
-    setRepoUrl(DEMO_REPO_URL);
     setPendingAction("demo");
     setFeedback({
       tone: "neutral",
-      message: "Starting the demo audit and opening the seeded audit room.",
+      message: "Starting the backend demo audit and opening the seeded audit room.",
     });
 
     try {

@@ -20,8 +20,10 @@ from .utils import (
 FrontendRuntimeFindingKind = Literal[
     "public_secret_exposure",
     "service_role_in_frontend",
+    "hardcoded_client_token",
     "token_storage",
     "unsafe_html_sink",
+    "unsafe_eval",
 ]
 
 PUBLIC_ENV_RE = re.compile(
@@ -37,8 +39,21 @@ COOKIE_TOKEN_RE = re.compile(
     r"document\.cookie\s*=\s*['\"][^'\"]*(?:token|auth|session|jwt|refresh)[^'\"]*=",
     re.IGNORECASE,
 )
-DANGEROUS_HTML_RE = re.compile(r"dangerouslySetInnerHTML|\.innerHTML\s*=", re.IGNORECASE)
+DANGEROUS_HTML_RE = re.compile(
+    r"dangerouslySetInnerHTML|\.innerHTML\s*=|\.outerHTML\s*=|insertAdjacentHTML\s*\(|\bv-html\s*=|unsafeHTML\s*\(",
+    re.IGNORECASE,
+)
+UNSAFE_EVAL_RE = re.compile(
+    r"\beval\(|new Function\(|setTimeout\(\s*['\"]|setInterval\(\s*['\"]",
+    re.IGNORECASE,
+)
+HARDCODED_CLIENT_TOKEN_RE = re.compile(
+    r"\b(?:token|accessToken|refreshToken|jwt|apiKey|api_key|secret|authorization)\b[^=\n:]{0,24}"
+    r"[:=]\s*['\"](?:Bearer\s+)?[A-Za-z0-9._-]{20,}['\"]",
+    re.IGNORECASE,
+)
 SAFE_PUBLIC_TOKENS = ("anon_key", "anonymous", "public_key")
+PLACEHOLDER_MARKERS = ("example", "sample", "placeholder", "changeme", "<redacted>", "<token>", "dummy")
 
 
 class FrontendRuntimeAgentError(ValueError):
@@ -69,6 +84,7 @@ class FrontendRuntimeAgent(BaseAgent):
 
     name = "frontend_runtime"
     description = "Looks for public secret exposure, risky browser token handling, and direct HTML sinks."
+    repo_map_inputs = ("frontend", "config", "auth", "env", "manifests")
 
     def __init__(self, *, max_files: int = 80, max_findings: int = 24) -> None:
         self.max_files = max_files
@@ -85,10 +101,35 @@ class FrontendRuntimeAgent(BaseAgent):
                 title=item.title,
                 summary=item.description,
                 severity=item.severity,
+                confidence=item.confidence,
                 file_path=item.file_path,
                 line_start=item.line_start,
                 line_end=item.line_start,
                 rule_id=item.kind,
+                category=self.agent_name,
+                inputs=self.repo_map_inputs,
+                checks=[item.kind],
+                evidence=[
+                    self.evidence(
+                        kind="code",
+                        summary=item.title,
+                        file_path=item.file_path,
+                        line_start=item.line_start,
+                        line_end=item.line_start,
+                        excerpt=item.evidence_excerpt or None,
+                    )
+                ],
+                patch_suggestion=self.patch_suggestion(
+                    strategy=self._patch_strategy(item.kind),
+                    summary=item.suggested_remediation,
+                    changes=[
+                        self.patch_change(
+                            file_path=item.file_path,
+                            summary=item.suggested_remediation,
+                            action="review" if item.confidence == "low" else "edit",
+                        )
+                    ],
+                ),
                 metadata={
                     "confidence": item.confidence,
                     "evidence_excerpt": item.evidence_excerpt,
@@ -113,7 +154,7 @@ class FrontendRuntimeAgent(BaseAgent):
         targets = resolve_agent_targets(
             context,
             agent_names=("frontend_runtime",),
-            repo_map_categories=("manifests", "config", "auth", "routes", "env"),
+            repo_map_categories=("frontend", "manifests", "config", "auth", "routes", "env"),
             fallback_to_root=False,
         )
         targets = [target for target in targets if not should_skip_analysis_path(target.display_path)]
@@ -146,9 +187,11 @@ class FrontendRuntimeAgent(BaseAgent):
     def _scan_file(self, relative_path: str, text: str) -> list[FrontendRuntimeFinding]:
         findings: list[FrontendRuntimeFinding] = []
         findings.extend(self._public_env_findings(relative_path, text))
+        findings.extend(self._hardcoded_token_findings(relative_path, text))
         findings.extend(self._line_matches(relative_path, text, TOKEN_STORAGE_RE, "token_storage"))
         findings.extend(self._line_matches(relative_path, text, COOKIE_TOKEN_RE, "token_storage"))
         findings.extend(self._line_matches(relative_path, text, DANGEROUS_HTML_RE, "unsafe_html_sink"))
+        findings.extend(self._line_matches(relative_path, text, UNSAFE_EVAL_RE, "unsafe_eval"))
         return findings[: self.max_findings]
 
     def _public_env_findings(self, relative_path: str, text: str) -> list[FrontendRuntimeFinding]:
@@ -185,6 +228,31 @@ class FrontendRuntimeAgent(BaseAgent):
             )
         return findings
 
+    def _hardcoded_token_findings(self, relative_path: str, text: str) -> list[FrontendRuntimeFinding]:
+        findings: list[FrontendRuntimeFinding] = []
+        for line_number, raw_line in enumerate(text.splitlines(), start=1):
+            if not HARDCODED_CLIENT_TOKEN_RE.search(raw_line):
+                continue
+            lower_line = raw_line.lower()
+            if "process.env" in lower_line or "import.meta.env" in lower_line:
+                continue
+            if any(marker in lower_line for marker in PLACEHOLDER_MARKERS):
+                continue
+            findings.append(
+                FrontendRuntimeFinding(
+                    kind="hardcoded_client_token",
+                    severity="high",
+                    confidence="high",
+                    title="Frontend file contains hardcoded auth material",
+                    description="This browser-facing file appears to embed a token, API key, or bearer value directly in source.",
+                    file_path=relative_path,
+                    line_start=line_number,
+                    evidence_excerpt=self._redacted_line(raw_line),
+                    suggested_remediation="Move the secret or token flow to the server and expose only short-lived or non-sensitive public values to the client.",
+                )
+            )
+        return findings
+
     def _line_matches(
         self,
         relative_path: str,
@@ -210,7 +278,7 @@ class FrontendRuntimeAgent(BaseAgent):
                         suggested_remediation="Prefer HttpOnly cookies or another server-managed session approach for sensitive auth state.",
                     )
                 )
-            else:
+            elif kind == "unsafe_html_sink":
                 findings.append(
                     FrontendRuntimeFinding(
                         kind=kind,
@@ -224,16 +292,30 @@ class FrontendRuntimeAgent(BaseAgent):
                         suggested_remediation="Review the data source carefully and sanitize or avoid direct HTML injection when possible.",
                     )
                 )
+            else:
+                findings.append(
+                    FrontendRuntimeFinding(
+                        kind=kind,
+                        severity="high",
+                        confidence="medium",
+                        title="Frontend uses eval-like runtime execution",
+                        description="This file uses `eval`, `new Function`, or a string-based timer callback, which increases XSS and code-injection risk.",
+                        file_path=relative_path,
+                        line_start=line_number,
+                        evidence_excerpt=trim_output(raw_line, limit=180),
+                        suggested_remediation="Replace eval-like execution with explicit function references or safer data-driven control flow.",
+                    )
+                )
         return findings
 
     def _redacted_line(self, raw_line: str) -> str:
-        if "=" not in raw_line:
+        separator = "=" if "=" in raw_line else ":" if ":" in raw_line else ""
+        if not separator:
             return trim_output(raw_line, limit=180)
-        left, _, right = raw_line.partition("=")
-        right = right.strip()
-        if not right:
+        left, _, right = raw_line.partition(separator)
+        if not right.strip():
             return trim_output(raw_line, limit=180)
-        return trim_output(f"{left}=<redacted>", limit=180)
+        return trim_output(f"{left}{separator}<redacted>", limit=180)
 
     def _build_summary(self, report: FrontendRuntimeReport) -> str:
         if report.scanned_files == 0:
@@ -242,8 +324,13 @@ class FrontendRuntimeAgent(BaseAgent):
             return f"Scanned {report.scanned_files} frontend files and found no obvious runtime exposure issues."
         return (
             f"Scanned {report.scanned_files} frontend files and produced {len(report.findings)} findings "
-            "about public secret exposure, browser token handling, or unsafe HTML sinks."
+            "about hardcoded client secrets, browser token handling, or unsafe HTML sinks."
         )
+
+    def _patch_strategy(self, kind: FrontendRuntimeFindingKind) -> str:
+        if kind in {"unsafe_html_sink", "unsafe_eval"}:
+            return "manual_review"
+        return "reduce_exposure"
 
 
 async def run(context: AgentContext) -> AgentResult:

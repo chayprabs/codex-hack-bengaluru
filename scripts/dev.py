@@ -88,7 +88,12 @@ def stop_process(label: str, process: subprocess.Popen[str]) -> None:
 
     try:
         if os.name == "nt":
-            process.send_signal(signal.CTRL_BREAK_EVENT)
+            subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
         else:
             os.killpg(process.pid, signal.SIGTERM)
     except Exception:
@@ -101,7 +106,12 @@ def stop_process(label: str, process: subprocess.Popen[str]) -> None:
         pass
 
     if os.name == "nt":
-        process.kill()
+        subprocess.run(
+            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
     else:
         os.killpg(process.pid, signal.SIGKILL)
     process.wait(timeout=5)

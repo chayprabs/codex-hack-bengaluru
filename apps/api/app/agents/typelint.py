@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 from pathlib import Path
+import re
 import shutil
 import tomllib
 from typing import Any, Literal
@@ -44,6 +45,8 @@ SCRIPT_FAILURE_PATTERNS = (
 )
 PYTHON_SOURCE_DIRS = ("app", "src")
 TYPECHECK_SCRIPT_NAMES = ("typecheck", "check-types", "type-check", "types")
+ESLINT_SCRIPT_RE = re.compile(r"\beslint\b", re.IGNORECASE)
+TSC_SCRIPT_RE = re.compile(r"\btsc\b", re.IGNORECASE)
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,6 +84,7 @@ class TypeLintAgent(BaseAgent):
 
     name = "typelint"
     description = "Runs lightweight lint and type checks where project metadata suggests they exist."
+    repo_map_inputs = ("manifests", "lockfiles", "config", "routes", "validation")
 
     def __init__(
         self,
@@ -104,6 +108,29 @@ class TypeLintAgent(BaseAgent):
                 severity=item.severity,
                 file_path=item.file_path,
                 rule_id=item.kind,
+                category="build_type_lint",
+                inputs=self.repo_map_inputs,
+                checks=[item.kind],
+                evidence=[
+                    self.evidence(
+                        kind="command" if item.command_label else "manifest",
+                        summary=item.title,
+                        file_path=item.file_path,
+                        excerpt=item.evidence_excerpt or None,
+                        locator=item.command_label,
+                    )
+                ],
+                patch_suggestion=self.patch_suggestion(
+                    strategy="repair_build",
+                    summary=item.suggested_remediation,
+                    changes=[
+                        self.patch_change(
+                            file_path=item.file_path or ".",
+                            summary=item.suggested_remediation,
+                            action="review" if item.command_label else "edit",
+                        )
+                    ],
+                ),
                 metadata={
                     "description": item.description,
                     "command_label": item.command_label,
@@ -259,6 +286,26 @@ class TypeLintAgent(BaseAgent):
         has_typescript = "typescript" in dependencies
 
         lint_script = scripts.get("lint") if isinstance(scripts.get("lint"), str) else None
+        type_script_name = next(
+            (
+                name
+                for name in TYPECHECK_SCRIPT_NAMES
+                if isinstance(scripts.get(name), str) and scripts.get(name, "").strip()
+            ),
+            None,
+        )
+        type_script = scripts.get(type_script_name) if type_script_name is not None else None
+        ancestor_dependencies = self._ancestor_node_dependencies(project.path)
+
+        findings.extend(
+            self._script_assumption_findings(
+                project,
+                lint_script=lint_script,
+                type_script=type_script if isinstance(type_script, str) else None,
+                dependencies=dependencies | ancestor_dependencies,
+            )
+        )
+
         if has_eslint and lint_script is None:
             findings.append(
                 self._finding(
@@ -271,14 +318,6 @@ class TypeLintAgent(BaseAgent):
                 )
             )
 
-        type_script_name = next(
-            (
-                name
-                for name in TYPECHECK_SCRIPT_NAMES
-                if isinstance(scripts.get(name), str) and scripts.get(name, "").strip()
-            ),
-            None,
-        )
         if has_tsconfig and not has_typescript and type_script_name is None:
             findings.append(
                 self._finding(
@@ -454,6 +493,55 @@ class TypeLintAgent(BaseAgent):
             if isinstance(values, dict):
                 dependencies.update(str(name).lower() for name in values.keys())
         return dependencies
+
+    def _ancestor_node_dependencies(self, project_root: Path) -> set[str]:
+        dependencies: set[str] = set()
+        current = project_root.parent
+        while current != current.parent:
+            manifest_path = current / "package.json"
+            if manifest_path.is_file():
+                try:
+                    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    payload = {}
+                dependencies.update(self._node_dependencies(payload))
+            current = current.parent
+        return dependencies
+
+    def _script_assumption_findings(
+        self,
+        project: _ProjectRoot,
+        *,
+        lint_script: str | None,
+        type_script: str | None,
+        dependencies: set[str],
+    ) -> list[TypeLintFinding]:
+        findings: list[TypeLintFinding] = []
+        if lint_script and ESLINT_SCRIPT_RE.search(lint_script) and "eslint" not in dependencies and "next lint" not in lint_script.lower():
+            findings.append(
+                self._finding(
+                    kind="broken_script",
+                    severity="medium",
+                    title="Lint script assumes ESLint is installed",
+                    description="The lint script calls `eslint`, but no local or ancestor package.json lists `eslint` as a dependency.",
+                    file_path=f"{project.display_path}/package.json",
+                    evidence_excerpt=f"lint: {trim_output(lint_script, limit=180)}",
+                    suggested_remediation="Add ESLint to the workspace dependencies or update the lint script to use an installed tool.",
+                )
+            )
+        if type_script and TSC_SCRIPT_RE.search(type_script) and "typescript" not in dependencies:
+            findings.append(
+                self._finding(
+                    kind="broken_script",
+                    severity="medium",
+                    title="Typecheck script assumes TypeScript is installed",
+                    description="The typecheck script calls `tsc`, but no local or ancestor package.json lists `typescript` as a dependency.",
+                    file_path=f"{project.display_path}/package.json",
+                    evidence_excerpt=f"typecheck: {trim_output(type_script, limit=180)}",
+                    suggested_remediation="Add TypeScript to the workspace dependencies or update the typecheck script to use an installed tool.",
+                )
+            )
+        return findings
 
     def _python_dependencies(self, payload: dict[str, Any]) -> set[str]:
         dependencies: set[str] = set()

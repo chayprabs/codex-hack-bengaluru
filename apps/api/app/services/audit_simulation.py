@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Callable
 
-from ..models import AgentState, AgentStatus, Audit, AuditState, Finding, FindingSeverity
+from ..models import AgentState, AgentStatus, Audit, AuditState, CoverageBand, Finding, FindingSeverity
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,6 +18,17 @@ class SimulatedFindingSpec:
 class ScoreUpdateSpec:
     score: int
     reason: str
+    coverage: int | None = None
+    coverage_summary: str | None = None
+    confidence_limited: bool | None = None
+    supported_areas: tuple[str, ...] | None = None
+    partially_supported_areas: tuple[str, ...] | None = None
+    unsupported_areas: tuple[str, ...] | None = None
+    scanned_files_count: int | None = None
+    skipped_files_count: int | None = None
+    frameworks_detected: tuple[str, ...] | None = None
+    checks_run: tuple[str, ...] | None = None
+    checks_skipped: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,6 +40,27 @@ class AuditLifecycleStep:
     agent_message: str | None = None
     finding: SimulatedFindingSpec | None = None
     score_update: ScoreUpdateSpec | None = None
+    completion_message: str | None = None
+
+
+def _coverage_band(score: int) -> CoverageBand:
+    if score >= 85:
+        return "deep"
+    if score >= 70:
+        return "broad"
+    if score >= 55:
+        return "targeted"
+    if score >= 30:
+        return "limited"
+    return "minimal"
+
+
+def _coverage_summary(score: int, band: CoverageBand) -> str:
+    if score < 55:
+        return (
+            f"Coverage is {score}/100 ({band}). Confidence is limited until repository access, specialist execution, and verification close out."
+        )
+    return f"Coverage is {score}/100 ({band}) across the current planner, scanner, and verifier flow."
 
 
 def apply_lifecycle_step(
@@ -69,6 +101,39 @@ def apply_lifecycle_step(
 
     if step.score_update is not None:
         updated.score = step.score_update.score
+        if step.score_update.coverage is not None:
+            updated.coverage = step.score_update.coverage
+            updated.coverage_percent = step.score_update.coverage
+            updated.coverage_band = _coverage_band(step.score_update.coverage)
+            updated.coverage_summary = (
+                step.score_update.coverage_summary
+                or _coverage_summary(step.score_update.coverage, updated.coverage_band)
+            )
+            updated.confidence_limited = (
+                step.score_update.confidence_limited
+                if step.score_update.confidence_limited is not None
+                else step.score_update.coverage < 55
+            )
+
+        if step.score_update.supported_areas is not None:
+            updated.supported_areas = list(step.score_update.supported_areas)
+        if step.score_update.partially_supported_areas is not None:
+            updated.partially_supported_areas = list(step.score_update.partially_supported_areas)
+        if step.score_update.unsupported_areas is not None:
+            updated.unsupported_areas = list(step.score_update.unsupported_areas)
+        if step.score_update.scanned_files_count is not None:
+            updated.scanned_files_count = step.score_update.scanned_files_count
+        if step.score_update.skipped_files_count is not None:
+            updated.skipped_files_count = step.score_update.skipped_files_count
+        if step.score_update.frameworks_detected is not None:
+            updated.frameworks_detected = list(step.score_update.frameworks_detected)
+        if step.score_update.checks_run is not None:
+            updated.checks_run = list(step.score_update.checks_run)
+        if step.score_update.checks_skipped is not None:
+            updated.checks_skipped = list(step.score_update.checks_skipped)
+
+    if step.completion_message is not None:
+        updated.completion_message = step.completion_message
 
     return updated
 
@@ -101,6 +166,7 @@ def build_default_simulation_steps(_: Audit) -> list[AuditLifecycleStep]:
             agent_message="Mapping repository structure and audit scope.",
             score_update=ScoreUpdateSpec(
                 score=96,
+                coverage=24,
                 reason="Repository intake completed and the initial risk baseline was set.",
             ),
         ),
@@ -131,6 +197,7 @@ def build_default_simulation_steps(_: Audit) -> list[AuditLifecycleStep]:
             ),
             score_update=ScoreUpdateSpec(
                 score=84,
+                coverage=46,
                 reason="The initial scan introduced a medium-risk transport finding.",
             ),
         ),
@@ -149,6 +216,7 @@ def build_default_simulation_steps(_: Audit) -> list[AuditLifecycleStep]:
             ),
             score_update=ScoreUpdateSpec(
                 score=78,
+                coverage=58,
                 reason="A second low-risk signal lowered the running trust score slightly.",
             ),
         ),
@@ -168,6 +236,7 @@ def build_default_simulation_steps(_: Audit) -> list[AuditLifecycleStep]:
             delay_seconds=0.25,
             score_update=ScoreUpdateSpec(
                 score=74,
+                coverage=86,
                 reason="Verification confirmed the simulated findings and finalized the score.",
             ),
         ),

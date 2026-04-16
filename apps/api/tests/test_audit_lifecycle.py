@@ -257,6 +257,13 @@ class AuditLifecycleTests(unittest.TestCase):
         self.assertEqual([payload.score for payload in score_payloads], [96, 84, 74])
         self.assertEqual([payload.previous_score for payload in score_payloads], [100, 96, 84])
         self.assertEqual([payload.delta for payload in score_payloads], [-4, -12, -10])
+        self.assertTrue(all(0 <= payload.coverage <= 100 for payload in score_payloads))
+        self.assertTrue(
+            all(
+                payload.coverage_band in {"minimal", "limited", "targeted", "broad", "deep"}
+                for payload in score_payloads
+            )
+        )
         self.assertTrue(all(0 <= payload.score <= 100 for payload in score_payloads))
         self.assertTrue(all(payload.reason for payload in score_payloads))
 
@@ -313,6 +320,19 @@ class AuditLifecycleTests(unittest.TestCase):
                 "status",
                 "repo_url",
                 "score",
+                "coverage",
+                "coverage_percent",
+                "coverage_band",
+                "coverage_summary",
+                "confidence_limited",
+                "supported_areas",
+                "partially_supported_areas",
+                "unsupported_areas",
+                "scanned_files_count",
+                "skipped_files_count",
+                "frameworks_detected",
+                "checks_run",
+                "checks_skipped",
                 "updated_at",
                 "finding_count",
                 "message",
@@ -321,6 +341,9 @@ class AuditLifecycleTests(unittest.TestCase):
         self.assertEqual(body["audit_id"], audit.id)
         self.assertEqual(body["status"], "completed")
         self.assertEqual(body["score"], final_audit.score)
+        self.assertEqual(body["coverage"], final_audit.coverage)
+        self.assertEqual(body["coverage_percent"], final_audit.coverage_percent)
+        self.assertEqual(body["coverage_band"], final_audit.coverage_band)
         self.assertEqual(body["finding_count"], len(final_audit.findings))
         self.assertIsNone(body["message"])
 

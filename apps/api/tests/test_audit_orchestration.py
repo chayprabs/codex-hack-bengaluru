@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import unittest
 from dataclasses import dataclass, field
-from pathlib import Path
 from uuid import uuid4
 from unittest.mock import patch
 
@@ -250,6 +249,15 @@ class AuditOrchestrationTests(unittest.TestCase):
             "Route lacks explicit response model",
         ])
         self.assertLess(final_audit.score, 100)
+        self.assertEqual(final_audit.coverage, final_audit.coverage_percent)
+        self.assertEqual(final_audit.frameworks_detected, ["FastAPI"])
+        self.assertEqual(final_audit.scanned_files_count, 8)
+        self.assertEqual(final_audit.skipped_files_count, 0)
+        self.assertEqual(final_audit.supported_areas, ["API routes"])
+        self.assertEqual(final_audit.partially_supported_areas, [])
+        self.assertEqual(final_audit.unsupported_areas, [])
+        self.assertEqual(final_audit.checks_run, ["dependency", "api_contract"])
+        self.assertEqual(final_audit.checks_skipped, [])
         self.assertEqual(len(self.events.findings), 2)
         self.assertGreaterEqual(len(self.events.score_updates), 1)
         self.assertEqual(len(self.events.completions), 1)
@@ -293,6 +301,11 @@ class AuditOrchestrationTests(unittest.TestCase):
         self.assertEqual(len(final_audit.findings), 1)
         self.assertEqual(final_audit.findings[0].title, "Repository workspace could not be acquired")
         self.assertLess(final_audit.score, 100)
+        self.assertEqual(final_audit.coverage, final_audit.coverage_percent)
+        self.assertEqual(final_audit.coverage_percent, 10)
+        self.assertTrue(final_audit.confidence_limited)
+        self.assertEqual(final_audit.frameworks_detected, [])
+        self.assertEqual(final_audit.checks_run, [])
         self.assertEqual(len(self.events.completions), 1)
         self.assertIn("limited coverage", self.events.completions[0][1].message or "")
 
@@ -333,7 +346,7 @@ class AuditOrchestrationTests(unittest.TestCase):
         self.assertEqual(live_agent_runner.calls[0]["execution_mode"], "no_execution")
         self.assertIsNone(live_agent_runner.calls[0]["execution_selection"])
         self.assertEqual(final_audit.findings[0].title, "Sandbox execution backend could not be prepared")
-        self.assertIn("limited coverage", self.events.completions[0][1].message or "")
+        self.assertIn("limited automated coverage", self.events.completions[0][1].message or "")
 
     @staticmethod
     def _seed_audit(runner: AuditRunner, repo_url: str) -> Audit:

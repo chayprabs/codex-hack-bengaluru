@@ -12,6 +12,7 @@ ScoreBand = Literal["strong", "good", "guarded", "weak", "critical"]
 FindingSeverity = Literal["low", "medium", "high", "critical"]
 FindingConfidence = Literal["low", "medium", "high"]
 VerificationStatus = Literal["passed", "failed", "partial", "skipped"]
+CoverageBand = Literal["minimal", "limited", "targeted", "broad", "deep"]
 
 BASE_TRUST_SCORE = 100
 SEVERITY_PENALTIES: dict[FindingSeverity, int] = {
@@ -36,9 +37,26 @@ VERIFIED_REMEDIATION_BONUS = 3
 MAX_CLEAN_RUN_BONUS = 8
 MAX_VERIFICATION_BONUS = 8
 MAX_REMEDIATION_BONUS = 12
+BASE_COVERAGE_SCORE = 12
+REPO_ACCESS_POINTS = 22
+PLANNING_POINTS = 16
+PARTIAL_PLANNING_POINTS = 6
+MAX_EXECUTION_POINTS = 28
+NO_SPECIALIST_MATCH_POINTS = 14
+MAX_EVIDENCE_POINTS = 10
+FINDING_EVIDENCE_BASE_POINTS = 4
+VERIFICATION_IN_PROGRESS_POINTS = 6
+VERIFICATION_COMPLETE_POINTS = 12
+LIMITATION_PENALTY_POINTS = 14
+FAILED_AGENT_PENALTY_POINTS = 6
+MAX_COVERAGE_PENALTY = 38
 
 __all__ = [
     "ScoringService",
+    "CoverageBreakdown",
+    "CoverageCounts",
+    "CoverageFormula",
+    "CoverageSnapshot",
     "TrustScoreBreakdown",
     "TrustScoreCounts",
     "TrustScoreFormula",
@@ -67,6 +85,19 @@ class TrustScoreCounts(StrictModel):
         return self.critical + self.high + self.medium + self.low
 
 
+class CoverageCounts(StrictModel):
+    selected_agents: int = 0
+    completed_agents: int = 0
+    failed_agents: int = 0
+    findings_with_location: int = 0
+    findings_without_location: int = 0
+    limitation_count: int = 0
+
+    @property
+    def total_findings(self) -> int:
+        return self.findings_with_location + self.findings_without_location
+
+
 class TrustScoreFormula(StrictModel):
     base_score: int = BASE_TRUST_SCORE
     severity_penalties: dict[FindingSeverity, int] = SEVERITY_PENALTIES.copy()
@@ -77,6 +108,22 @@ class TrustScoreFormula(StrictModel):
     max_verification_bonus: int = MAX_VERIFICATION_BONUS
     verified_remediation_bonus: int = VERIFIED_REMEDIATION_BONUS
     max_remediation_bonus: int = MAX_REMEDIATION_BONUS
+
+
+class CoverageFormula(StrictModel):
+    base_score: int = BASE_COVERAGE_SCORE
+    repo_access_points: int = REPO_ACCESS_POINTS
+    planning_points: int = PLANNING_POINTS
+    partial_planning_points: int = PARTIAL_PLANNING_POINTS
+    max_execution_points: int = MAX_EXECUTION_POINTS
+    no_specialist_match_points: int = NO_SPECIALIST_MATCH_POINTS
+    max_evidence_points: int = MAX_EVIDENCE_POINTS
+    finding_evidence_base_points: int = FINDING_EVIDENCE_BASE_POINTS
+    verification_in_progress_points: int = VERIFICATION_IN_PROGRESS_POINTS
+    verification_complete_points: int = VERIFICATION_COMPLETE_POINTS
+    limitation_penalty_points: int = LIMITATION_PENALTY_POINTS
+    failed_agent_penalty_points: int = FAILED_AGENT_PENALTY_POINTS
+    max_penalty_points: int = MAX_COVERAGE_PENALTY
 
 
 class TrustScoreBreakdown(StrictModel):
@@ -93,11 +140,30 @@ class TrustScoreBreakdown(StrictModel):
     finding_counts: TrustScoreCounts = TrustScoreCounts()
 
 
+class CoverageBreakdown(StrictModel):
+    base_score: int = BASE_COVERAGE_SCORE
+    repo_access_points: int = 0
+    planning_points: int = 0
+    execution_points: int = 0
+    evidence_points: int = 0
+    verification_points: int = 0
+    penalty_points: int = 0
+    counts: CoverageCounts = CoverageCounts()
+
+
 class TrustScoreSnapshot(StrictModel):
     score: int
     band: ScoreBand
     summary: str
     breakdown: TrustScoreBreakdown
+
+
+class CoverageSnapshot(StrictModel):
+    score: int
+    band: CoverageBand
+    summary: str
+    confidence_limited: bool
+    breakdown: CoverageBreakdown
 
 
 class TrustScoreSummary(StrictModel):
@@ -110,14 +176,28 @@ class TrustScoreSummary(StrictModel):
     current: TrustScoreSnapshot
     before: TrustScoreSnapshot | None = None
     after: TrustScoreSnapshot | None = None
+    coverage_score: int
+    coverage_band: CoverageBand
+    coverage_summary: str
+    confidence_limited: bool
+    coverage: CoverageSnapshot
+    before_coverage: CoverageSnapshot | None = None
+    after_coverage: CoverageSnapshot | None = None
     formula: TrustScoreFormula = TrustScoreFormula()
+    coverage_formula: CoverageFormula = CoverageFormula()
 
 
 class ScoringService:
     """Compute a stable, understandable trust score from structured audit output."""
 
-    def __init__(self, *, formula: TrustScoreFormula | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        formula: TrustScoreFormula | None = None,
+        coverage_formula: CoverageFormula | None = None,
+    ) -> None:
         self.formula = formula or TrustScoreFormula()
+        self.coverage_formula = coverage_formula or CoverageFormula()
 
     def score(
         self,
@@ -150,6 +230,12 @@ class ScoringService:
         agent_results: Sequence[object] = (),
         verification_summaries: Sequence[object] = (),
         remediations: Sequence[object] | int = (),
+        repo_acquired: bool = False,
+        planning_completed: bool = False,
+        selected_agents: int = 0,
+        verification_started: bool = False,
+        verification_completed: bool = False,
+        limitations: Sequence[object] | int = (),
     ) -> TrustScoreSummary:
         snapshot = self.score(
             findings=findings,
@@ -157,12 +243,28 @@ class ScoringService:
             verification_summaries=verification_summaries,
             remediations=remediations,
         )
+        coverage_snapshot = self.coverage(
+            findings=findings,
+            agent_results=agent_results,
+            repo_acquired=repo_acquired,
+            planning_completed=planning_completed,
+            selected_agents=selected_agents,
+            verification_started=verification_started,
+            verification_completed=verification_completed or self._verification_completed(verification_summaries),
+            limitations=limitations,
+        )
         return TrustScoreSummary(
             current_score=snapshot.score,
             band=snapshot.band,
             summary=snapshot.summary,
             current=snapshot,
+            coverage_score=coverage_snapshot.score,
+            coverage_band=coverage_snapshot.band,
+            coverage_summary=coverage_snapshot.summary,
+            confidence_limited=coverage_snapshot.confidence_limited,
+            coverage=coverage_snapshot,
             formula=self.formula,
+            coverage_formula=self.coverage_formula,
         )
 
     def compare(
@@ -172,10 +274,22 @@ class ScoringService:
         before_agent_results: Sequence[object] = (),
         before_verification_summaries: Sequence[object] = (),
         before_remediations: Sequence[object] | int = (),
+        before_repo_acquired: bool = False,
+        before_planning_completed: bool = False,
+        before_selected_agents: int = 0,
+        before_verification_started: bool = False,
+        before_verification_completed: bool = False,
+        before_limitations: Sequence[object] | int = (),
         after_findings: Sequence[object] = (),
         after_agent_results: Sequence[object] = (),
         after_verification_summaries: Sequence[object] = (),
         after_remediations: Sequence[object] | int = (),
+        after_repo_acquired: bool = False,
+        after_planning_completed: bool = False,
+        after_selected_agents: int = 0,
+        after_verification_started: bool = False,
+        after_verification_completed: bool = False,
+        after_limitations: Sequence[object] | int = (),
     ) -> TrustScoreSummary:
         before_snapshot = self.score(
             findings=before_findings,
@@ -189,6 +303,26 @@ class ScoringService:
             verification_summaries=after_verification_summaries,
             remediations=after_remediations,
         )
+        before_coverage_snapshot = self.coverage(
+            findings=before_findings,
+            agent_results=before_agent_results,
+            repo_acquired=before_repo_acquired,
+            planning_completed=before_planning_completed,
+            selected_agents=before_selected_agents,
+            verification_started=before_verification_started,
+            verification_completed=before_verification_completed or self._verification_completed(before_verification_summaries),
+            limitations=before_limitations,
+        )
+        after_coverage_snapshot = self.coverage(
+            findings=after_findings,
+            agent_results=after_agent_results,
+            repo_acquired=after_repo_acquired,
+            planning_completed=after_planning_completed,
+            selected_agents=after_selected_agents,
+            verification_started=after_verification_started,
+            verification_completed=after_verification_completed or self._verification_completed(after_verification_summaries),
+            limitations=after_limitations,
+        )
         delta = after_snapshot.score - before_snapshot.score
         return TrustScoreSummary(
             current_score=after_snapshot.score,
@@ -200,7 +334,15 @@ class ScoringService:
             current=after_snapshot,
             before=before_snapshot,
             after=after_snapshot,
+            coverage_score=after_coverage_snapshot.score,
+            coverage_band=after_coverage_snapshot.band,
+            coverage_summary=after_coverage_snapshot.summary,
+            confidence_limited=after_coverage_snapshot.confidence_limited,
+            coverage=after_coverage_snapshot,
+            before_coverage=before_coverage_snapshot,
+            after_coverage=after_coverage_snapshot,
             formula=self.formula,
+            coverage_formula=self.coverage_formula,
         )
 
     def summarize_audit(
@@ -210,6 +352,12 @@ class ScoringService:
         agent_results: Sequence[object] = (),
         verification_summaries: Sequence[object] = (),
         remediations: Sequence[object] | int = (),
+        repo_acquired: bool = False,
+        planning_completed: bool = False,
+        selected_agents: int = 0,
+        verification_started: bool = False,
+        verification_completed: bool = False,
+        limitations: Sequence[object] | int = (),
     ) -> TrustScoreSummary:
         findings = self._extract_findings(audit)
         return self.summarize(
@@ -217,6 +365,53 @@ class ScoringService:
             agent_results=agent_results,
             verification_summaries=verification_summaries,
             remediations=remediations,
+            repo_acquired=repo_acquired,
+            planning_completed=planning_completed,
+            selected_agents=selected_agents,
+            verification_started=verification_started,
+            verification_completed=verification_completed,
+            limitations=limitations,
+        )
+
+    def coverage(
+        self,
+        *,
+        findings: Sequence[object] = (),
+        agent_results: Sequence[object] = (),
+        repo_acquired: bool = False,
+        planning_completed: bool = False,
+        selected_agents: int = 0,
+        verification_started: bool = False,
+        verification_completed: bool = False,
+        limitations: Sequence[object] | int = (),
+    ) -> CoverageSnapshot:
+        counts = self._build_coverage_counts(
+            findings=findings,
+            agent_results=agent_results,
+            selected_agents=selected_agents,
+            limitations=limitations,
+        )
+        breakdown = self._build_coverage_breakdown(
+            counts=counts,
+            repo_acquired=repo_acquired,
+            planning_completed=planning_completed,
+            verification_started=verification_started,
+            verification_completed=verification_completed,
+        )
+        score = self._finalize_coverage_score(breakdown)
+        band = self._coverage_band_for_score(score)
+        limited_confidence = score < 55
+        return CoverageSnapshot(
+            score=score,
+            band=band,
+            summary=self._coverage_summary(
+                score=score,
+                band=band,
+                breakdown=breakdown,
+                limited_confidence=limited_confidence,
+            ),
+            confidence_limited=limited_confidence,
+            breakdown=breakdown,
         )
 
     def _build_breakdown(
@@ -266,6 +461,124 @@ class ScoringService:
             partial_verifications=partial_verifications,
             verified_remediations=verified_remediations,
             finding_counts=counts,
+        )
+
+    def _build_coverage_counts(
+        self,
+        *,
+        findings: Sequence[object],
+        agent_results: Sequence[object],
+        selected_agents: int,
+        limitations: Sequence[object] | int,
+    ) -> CoverageCounts:
+        deduped_findings: list[object] = []
+        seen_finding_keys: set[tuple[str, str, str, str]] = set()
+        for finding in list(findings) + [item for result in agent_results for item in self._extract_findings(result)]:
+            key = (
+                str(self._read(finding, "id", default="") or ""),
+                str(self._read(finding, "title", default="") or ""),
+                str(self._read(finding, "file_path", default="") or ""),
+                str(self._read(finding, "line", default=self._read(finding, "line_start", default="")) or ""),
+            )
+            if key in seen_finding_keys:
+                continue
+            seen_finding_keys.add(key)
+            deduped_findings.append(finding)
+
+        findings_with_location = 0
+        findings_without_location = 0
+        for finding in deduped_findings:
+            file_path = str(self._read(finding, "file_path", default="") or "").strip()
+            line = self._read(finding, "line", default=self._read(finding, "line_start", default=None))
+            if file_path or line is not None:
+                findings_with_location += 1
+            else:
+                findings_without_location += 1
+
+        completed_agents = 0
+        failed_agents = 0
+        for result in agent_results:
+            status = str(self._read(result, "status", default="")).strip().lower()
+            if status == "completed":
+                completed_agents += 1
+            elif status in {"failed", "needs_review"}:
+                failed_agents += 1
+
+        normalized_selected = max(selected_agents, completed_agents + failed_agents)
+
+        return CoverageCounts(
+            selected_agents=normalized_selected,
+            completed_agents=completed_agents,
+            failed_agents=failed_agents,
+            findings_with_location=findings_with_location,
+            findings_without_location=findings_without_location,
+            limitation_count=self._count_limitations(limitations),
+        )
+
+    def _build_coverage_breakdown(
+        self,
+        *,
+        counts: CoverageCounts,
+        repo_acquired: bool,
+        planning_completed: bool,
+        verification_started: bool,
+        verification_completed: bool,
+    ) -> CoverageBreakdown:
+        repo_access_points = self.coverage_formula.repo_access_points if repo_acquired else 0
+        planning_points = (
+            self.coverage_formula.planning_points
+            if planning_completed
+            else self.coverage_formula.partial_planning_points
+            if repo_acquired
+            else 0
+        )
+
+        if counts.selected_agents > 0:
+            execution_points = round(
+                self.coverage_formula.max_execution_points * (counts.completed_agents / counts.selected_agents)
+            )
+        elif planning_completed and repo_acquired:
+            execution_points = self.coverage_formula.no_specialist_match_points
+        else:
+            execution_points = 0
+
+        if counts.total_findings > 0:
+            evidence_ratio = counts.findings_with_location / counts.total_findings
+            evidence_points = min(
+                self.coverage_formula.finding_evidence_base_points
+                + round((self.coverage_formula.max_evidence_points - self.coverage_formula.finding_evidence_base_points) * evidence_ratio),
+                self.coverage_formula.max_evidence_points,
+            )
+        elif counts.completed_agents > 0:
+            evidence_points = self.coverage_formula.max_evidence_points - 2
+        elif planning_completed:
+            evidence_points = self.coverage_formula.finding_evidence_base_points
+        else:
+            evidence_points = 0
+
+        verification_points = (
+            self.coverage_formula.verification_complete_points
+            if verification_completed
+            else self.coverage_formula.verification_in_progress_points
+            if verification_started
+            else 0
+        )
+
+        penalty_points = min(
+            (counts.limitation_count * self.coverage_formula.limitation_penalty_points)
+            + (counts.failed_agents * self.coverage_formula.failed_agent_penalty_points),
+            self.coverage_formula.max_penalty_points,
+        )
+
+        return CoverageBreakdown(
+            base_score=self.coverage_formula.base_score,
+            repo_access_points=repo_access_points,
+            planning_points=planning_points,
+            execution_points=execution_points,
+            evidence_points=evidence_points,
+            verification_points=verification_points,
+            penalty_points=penalty_points,
+            counts=counts,
         )
 
     def _normalize_findings(
@@ -351,11 +664,28 @@ class ScoringService:
                 verified += 1
         return verified
 
+    def _count_limitations(self, limitations: Sequence[object] | int) -> int:
+        if isinstance(limitations, int):
+            return max(limitations, 0)
+        return len(list(limitations))
+
     def _finalize_score(self, breakdown: TrustScoreBreakdown) -> int:
         raw_score = (
             breakdown.base_score
             - breakdown.finding_penalty_points
             + breakdown.total_bonus_points
+        )
+        return max(0, min(100, raw_score))
+
+    def _finalize_coverage_score(self, breakdown: CoverageBreakdown) -> int:
+        raw_score = (
+            breakdown.base_score
+            + breakdown.repo_access_points
+            + breakdown.planning_points
+            + breakdown.execution_points
+            + breakdown.evidence_points
+            + breakdown.verification_points
+            - breakdown.penalty_points
         )
         return max(0, min(100, raw_score))
 
@@ -369,6 +699,17 @@ class ScoringService:
         if score >= 30:
             return "weak"
         return "critical"
+
+    def _coverage_band_for_score(self, score: int) -> CoverageBand:
+        if score >= 85:
+            return "deep"
+        if score >= 70:
+            return "broad"
+        if score >= 55:
+            return "targeted"
+        if score >= 30:
+            return "limited"
+        return "minimal"
 
     def _snapshot_summary(
         self,
@@ -411,6 +752,42 @@ class ScoringService:
             f"to {after_snapshot.score} ({after_snapshot.band})."
         )
 
+    def _coverage_summary(
+        self,
+        *,
+        score: int,
+        band: CoverageBand,
+        breakdown: CoverageBreakdown,
+        limited_confidence: bool,
+    ) -> str:
+        counts = breakdown.counts
+        lane_summary = (
+            f"{counts.completed_agents}/{counts.selected_agents} specialist lanes completed"
+            if counts.selected_agents
+            else "no specialist lanes matched this audit"
+        )
+        evidence_summary = (
+            f"{counts.findings_with_location} anchored findings"
+            if counts.total_findings
+            else "no anchored findings were needed"
+        )
+
+        if limited_confidence:
+            limitation_summary = (
+                f"{counts.limitation_count} audit limitation{'' if counts.limitation_count == 1 else 's'} influenced the result"
+                if counts.limitation_count
+                else "verification or specialist coverage is still incomplete"
+            )
+            return (
+                f"Coverage is {score}/100 ({band}). Confidence is limited because {lane_summary}, "
+                f"{evidence_summary}, and {limitation_summary}."
+            )
+
+        return (
+            f"Coverage is {score}/100 ({band}) with {lane_summary}, "
+            f"{evidence_summary}, and verifier closeout in place."
+        )
+
     def _finding_summary(self, counts: TrustScoreCounts) -> str:
         parts: list[str] = []
         for severity in ("critical", "high", "medium", "low"):
@@ -424,6 +801,11 @@ class ScoringService:
     def _extract_findings(self, item: object) -> list[object]:
         raw = self._read(item, "findings", default=[])
         return list(raw) if isinstance(raw, Sequence) and not isinstance(raw, (str, bytes, bytearray)) else []
+
+    def _verification_completed(self, verification_summaries: Sequence[object]) -> bool:
+        if not verification_summaries:
+            return False
+        return any(str(self._read(item, "status", default="")).strip().lower() == "passed" for item in verification_summaries)
 
     def _read(self, item: object, key: str, *, default: Any) -> Any:
         if isinstance(item, Mapping):
@@ -458,12 +840,24 @@ def build_trust_score_summary(
     agent_results: Sequence[object] = (),
     verification_summaries: Sequence[object] = (),
     remediations: Sequence[object] | int = (),
+    repo_acquired: bool = False,
+    planning_completed: bool = False,
+    selected_agents: int = 0,
+    verification_started: bool = False,
+    verification_completed: bool = False,
+    limitations: Sequence[object] | int = (),
 ) -> TrustScoreSummary:
     return scoring_service.summarize(
         findings=findings,
         agent_results=agent_results,
         verification_summaries=verification_summaries,
         remediations=remediations,
+        repo_acquired=repo_acquired,
+        planning_completed=planning_completed,
+        selected_agents=selected_agents,
+        verification_started=verification_started,
+        verification_completed=verification_completed,
+        limitations=limitations,
     )
 
 

@@ -10,7 +10,7 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel, Field
 
 from .base import BaseAgent
-from .planner import PlannerAssignment, PlannerTarget, RepoWorkPlan
+from .planner import PlannerTarget, RepoWorkPlan
 from .repo_mapper import RepoMap, RepoMapFile
 from .types import AgentContext, AgentResult, FindingSeverity
 
@@ -249,6 +249,7 @@ class SecretsAgent(BaseAgent):
 
     name = "secrets"
     description = "Scans likely secret-bearing files for hardcoded credentials and tokens."
+    repo_map_inputs = ("env", "auth", "config", "webhooks")
 
     def __init__(
         self,
@@ -281,6 +282,29 @@ class SecretsAgent(BaseAgent):
                 line_start=item.line_start,
                 line_end=item.line_start,
                 rule_id=item.kind,
+                category=self.agent_name,
+                inputs=self.repo_map_inputs,
+                checks=[item.kind],
+                evidence=[
+                    self.evidence(
+                        kind="env" if item.file_path.startswith(".env") else "code",
+                        summary=item.title,
+                        file_path=item.file_path,
+                        line_start=item.line_start,
+                        line_end=item.line_start,
+                        excerpt=item.evidence_preview,
+                    )
+                ],
+                patch_suggestion=self.patch_suggestion(
+                    strategy="replace_literal",
+                    summary=item.suggested_remediation,
+                    changes=[
+                        self.patch_change(
+                            file_path=item.file_path,
+                            summary=item.suggested_remediation,
+                        )
+                    ],
+                ),
                 metadata={
                     "description": item.description,
                     "evidence_preview": item.evidence_preview,

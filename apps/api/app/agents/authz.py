@@ -21,6 +21,7 @@ AuthzFindingKind = Literal[
     "authorization_disabled_flag",
     "allow_all_policy",
     "suspicious_missing_authorization",
+    "idor_candidate",
 ]
 
 AUTHZ_MARKERS = (
@@ -56,6 +57,39 @@ ALLOW_ALL_POLICY_RE = re.compile(
     re.IGNORECASE,
 )
 ROUTE_MARKERS = ("@router.", "@app.", "router.", "app.", "export async function", "apirouter(")
+IDOR_ID_HINTS = (
+    "{user_id}",
+    "{account_id}",
+    "{project_id}",
+    "{team_id}",
+    "{organization_id}",
+    ":userId",
+    ":accountId",
+    ":projectId",
+    ":teamId",
+)
+DATA_LOOKUP_MARKERS = (
+    "get(",
+    "get_or_404",
+    ".query(",
+    ".filter(",
+    ".where(",
+    "find_unique",
+    "findfirst",
+    "find_by_pk",
+    "session.get(",
+    "select(",
+)
+OWNERSHIP_MARKERS = (
+    "current_user",
+    "request.user",
+    "user.id",
+    "owner_id",
+    "organization_id",
+    "team_id",
+    "account_id",
+    "tenant_id",
+)
 
 
 class AuthzAgentError(ValueError):
@@ -86,6 +120,7 @@ class AuthzAgent(BaseAgent):
 
     name = "authz"
     description = "Looks for authorization bypass flags, allow-all policy patterns, and weak authz coverage signals."
+    repo_map_inputs = ("auth", "routes", "config", "database", "validation")
 
     def __init__(self, *, max_files: int = 60, max_findings: int = 20) -> None:
         self.max_files = max_files
@@ -102,10 +137,35 @@ class AuthzAgent(BaseAgent):
                 title=item.title,
                 summary=item.description,
                 severity=item.severity,
+                confidence=item.confidence,
                 file_path=item.file_path,
                 line_start=item.line_start,
                 line_end=item.line_start,
                 rule_id=item.kind,
+                category=self.agent_name,
+                inputs=self.repo_map_inputs,
+                checks=[item.kind],
+                evidence=[
+                    self.evidence(
+                        kind="code",
+                        summary=item.title,
+                        file_path=item.file_path,
+                        line_start=item.line_start,
+                        line_end=item.line_start,
+                        excerpt=item.evidence_excerpt or None,
+                    )
+                ],
+                patch_suggestion=self.patch_suggestion(
+                    strategy=self._patch_strategy(item.kind),
+                    summary=item.suggested_remediation,
+                    changes=[
+                        self.patch_change(
+                            file_path=item.file_path,
+                            summary=item.suggested_remediation,
+                            action="review" if item.confidence == "low" else "edit",
+                        )
+                    ],
+                ),
                 metadata={
                     "confidence": item.confidence,
                     "evidence_excerpt": item.evidence_excerpt,
@@ -131,7 +191,7 @@ class AuthzAgent(BaseAgent):
         targets = resolve_agent_targets(
             context,
             agent_names=("authz", "auth"),
-            repo_map_categories=("auth", "routes", "config"),
+            repo_map_categories=("auth", "routes", "config", "database", "validation"),
             fallback_to_root=False,
         )
         targets = [target for target in targets if not should_skip_analysis_path(target.display_path)]
@@ -164,7 +224,10 @@ class AuthzAgent(BaseAgent):
     def _scan_file(self, relative_path: str, text: str) -> list[AuthzFinding]:
         lower_path = relative_path.lower()
         lower_text = text.lower()
-        if not any(token in lower_path or token in lower_text for token in AUTHZ_MARKERS + SENSITIVE_AUTHZ_HINTS):
+        if not any(token in lower_path or token in lower_text for token in AUTHZ_MARKERS + SENSITIVE_AUTHZ_HINTS) and not self._looks_like_idor_surface(
+            lower_path,
+            lower_text,
+        ):
             return []
 
         findings: list[AuthzFinding] = []
@@ -203,7 +266,18 @@ class AuthzAgent(BaseAgent):
         if coverage_finding is not None:
             findings.append(coverage_finding)
 
+        idor_finding = self._idor_review(relative_path, text)
+        if idor_finding is not None:
+            findings.append(idor_finding)
+
         return findings[: self.max_findings]
+
+    def _looks_like_idor_surface(self, lower_path: str, lower_text: str) -> bool:
+        return (
+            any(marker in lower_text for marker in ROUTE_MARKERS)
+            and any(hint.lower() in lower_text or hint.lower() in lower_path for hint in IDOR_ID_HINTS)
+            and any(marker in lower_text for marker in DATA_LOOKUP_MARKERS)
+        )
 
     def _line_matches(
         self,
@@ -267,6 +341,33 @@ class AuthzAgent(BaseAgent):
             suggested_remediation="Review this route manually and confirm a deny-by-default authorization check is applied.",
         )
 
+    def _idor_review(self, relative_path: str, text: str) -> AuthzFinding | None:
+        lower_text = text.lower()
+        lower_path = relative_path.lower()
+        if not any(marker in lower_text for marker in ROUTE_MARKERS):
+            return None
+        if not any(hint.lower() in lower_text or hint.lower() in lower_path for hint in IDOR_ID_HINTS):
+            return None
+        if not any(marker in lower_text for marker in DATA_LOOKUP_MARKERS):
+            return None
+        if any(marker in lower_text for marker in AUTHZ_MARKERS + OWNERSHIP_MARKERS):
+            return None
+
+        line_number, excerpt = self._first_matching_line(text, IDOR_ID_HINTS)
+        return AuthzFinding(
+            kind="idor_candidate",
+            severity="medium",
+            confidence="low",
+            title="Object-id route may lack ownership scoping",
+            description=(
+                "This route appears to read an object identifier and perform a lookup, but static inspection did not find a nearby authorization or ownership-scoping marker."
+            ),
+            file_path=relative_path,
+            line_start=line_number,
+            evidence_excerpt=excerpt,
+            suggested_remediation="Review the lookup path and ensure records are scoped to the current principal or tenant before returning data.",
+        )
+
     def _first_matching_line(self, text: str, tokens: tuple[str, ...]) -> tuple[int | None, str]:
         for line_number, raw_line in enumerate(text.splitlines(), start=1):
             lower_line = raw_line.lower()
@@ -284,6 +385,11 @@ class AuthzAgent(BaseAgent):
             f"Scanned {report.scanned_files} authz-related files and produced {len(report.findings)} findings, "
             f"including {review_only} low-confidence routes that should be reviewed manually."
         )
+
+    def _patch_strategy(self, kind: AuthzFindingKind) -> str:
+        if kind in {"suspicious_missing_authorization", "idor_candidate"}:
+            return "manual_review"
+        return "add_guard"
 
 
 async def run(context: AgentContext) -> AgentResult:

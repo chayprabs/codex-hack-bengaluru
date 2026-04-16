@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     audit_execution_backend: Literal["auto", "local", "docker"] = "auto"
 
     model_config = SettingsConfigDict(
-        env_file=(API_DIR / ".env", ROOT_DIR / ".env"),
+        env_file=(ROOT_DIR / ".env", API_DIR / ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
     )

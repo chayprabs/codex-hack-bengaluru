@@ -6,11 +6,22 @@ export function cn(...values: Array<string | false | null | undefined>) {
 
 export function isGithubRepoUrl(value: string) {
   try {
-    const url = new URL(value);
+    const url = new URL(value.trim());
+    const hostname = url.hostname.toLowerCase();
+    const parts = url.pathname.split("/").filter(Boolean);
+    const [owner, rawRepoName] = parts;
+    const repoName = rawRepoName?.endsWith(".git") ? rawRepoName.slice(0, -4) : rawRepoName;
+
     return (
-      (url.protocol === "http:" || url.protocol === "https:") &&
-      url.hostname.includes("github.com") &&
-      url.pathname.split("/").filter(Boolean).length >= 2
+      url.protocol === "https:" &&
+      (hostname === "github.com" || hostname === "www.github.com") &&
+      !url.username &&
+      !url.password &&
+      !url.search &&
+      !url.hash &&
+      parts.length === 2 &&
+      /^[A-Za-z0-9_.-]+$/.test(owner ?? "") &&
+      /^[A-Za-z0-9_.-]+$/.test(repoName ?? "")
     );
   } catch {
     return false;

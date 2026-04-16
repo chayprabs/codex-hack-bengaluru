@@ -31,7 +31,13 @@ export type {
 
 type ErrorPayload =
   | {
-      detail?: string;
+      detail?:
+        | string
+        | Array<{
+            loc?: Array<string | number>;
+            msg?: string;
+            type?: string;
+          }>;
       message?: string;
       [key: string]: unknown;
     }
@@ -72,6 +78,30 @@ export function buildApiUrl(path: string) {
 function readMessageFromPayload(payload: ErrorPayload) {
   if (typeof payload === "string") {
     return payload;
+  }
+
+  if (Array.isArray(payload?.detail)) {
+    const messages = payload.detail
+      .map((item) => {
+        if (!item || typeof item.msg !== "string") {
+          return null;
+        }
+
+        const location =
+          Array.isArray(item.loc) && item.loc.length > 0
+            ? item.loc
+                .filter((part) => part !== "body")
+                .map(String)
+                .join(".")
+            : null;
+
+        return location ? `${location}: ${item.msg}` : item.msg;
+      })
+      .filter((message): message is string => Boolean(message));
+
+    if (messages.length > 0) {
+      return messages.join(" ");
+    }
   }
 
   if (payload?.detail && typeof payload.detail === "string") {

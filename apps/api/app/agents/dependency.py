@@ -24,6 +24,9 @@ DependencyFindingKind = Literal[
     "multiple_lockfiles",
     "floating_version",
     "git_dependency",
+    "install_script_review",
+    "remote_install_script",
+    "high_risk_dependency",
     "invalid_manifest",
 ]
 
@@ -35,6 +38,16 @@ MANIFEST_NAMES = {
     "requirements.txt",
     "requirements-dev.txt",
     "pipfile",
+}
+LIFECYCLE_SCRIPT_NAMES = ("preinstall", "install", "postinstall", "prepare")
+REMOTE_FETCH_MARKERS = ("curl ", "wget ", "invoke-webrequest", "powershell -", "bash -c", "sh -c")
+HIGH_RISK_NODE_PACKAGES: dict[str, tuple[str, FindingSeverity]] = {
+    "request": ("Deprecated and unmaintained HTTP client package.", "medium"),
+    "node-sass": ("Deprecated Sass implementation with native install hooks.", "medium"),
+    "vm2": ("Sandbox package with a history of critical escape vulnerabilities.", "high"),
+}
+HIGH_RISK_PYTHON_PACKAGES: dict[str, tuple[str, FindingSeverity]] = {
+    "pycrypto": ("Unmaintained crypto library that should be replaced with a maintained alternative.", "medium"),
 }
 
 
@@ -66,6 +79,7 @@ class DependencyAgent(BaseAgent):
 
     name = "dependency"
     description = "Checks mapped manifests and lockfiles for reproducibility and dependency hygiene issues."
+    repo_map_inputs = ("manifests", "lockfiles", "config")
 
     def __init__(self, *, max_files: int = 40, max_findings: int = 24) -> None:
         self.max_files = max_files
@@ -82,10 +96,35 @@ class DependencyAgent(BaseAgent):
                 title=item.title,
                 summary=item.description,
                 severity=item.severity,
+                confidence=item.confidence,
                 file_path=item.file_path,
                 line_start=item.line_start,
                 line_end=item.line_start,
                 rule_id=item.kind,
+                category=self.agent_name,
+                inputs=self.repo_map_inputs,
+                checks=[item.kind],
+                evidence=[
+                    self.evidence(
+                        kind="manifest",
+                        summary=item.title,
+                        file_path=item.file_path,
+                        line_start=item.line_start,
+                        line_end=item.line_start,
+                        excerpt=item.evidence_excerpt or None,
+                    )
+                ],
+                patch_suggestion=self.patch_suggestion(
+                    strategy=self._patch_strategy(item.kind),
+                    summary=item.suggested_remediation,
+                    changes=[
+                        self.patch_change(
+                            file_path=item.file_path,
+                            summary=item.suggested_remediation,
+                            action="review" if item.confidence == "low" else "edit",
+                        )
+                    ],
+                ),
                 metadata={
                     "confidence": item.confidence,
                     "evidence_excerpt": item.evidence_excerpt,
@@ -201,6 +240,35 @@ class DependencyAgent(BaseAgent):
                 )
             )
 
+        scripts = payload.get("scripts")
+        if isinstance(scripts, dict):
+            for script_name in LIFECYCLE_SCRIPT_NAMES:
+                raw_script = scripts.get(script_name)
+                if not isinstance(raw_script, str) or not raw_script.strip():
+                    continue
+                lowered = raw_script.lower()
+                is_remote = any(marker in lowered for marker in REMOTE_FETCH_MARKERS)
+                findings.append(
+                    self._finding(
+                        kind="remote_install_script" if is_remote else "install_script_review",
+                        severity="medium" if is_remote else "low",
+                        confidence="medium" if is_remote else "low",
+                        title="Install lifecycle script fetches remote code" if is_remote else "Install lifecycle script deserves supply-chain review",
+                        description=(
+                            "This package lifecycle script appears to fetch or shell into remote code during install."
+                            if is_remote
+                            else "This package defines an install lifecycle script, which is worth reviewing because it executes automatically during dependency installation."
+                        ),
+                        file_path=relative_path,
+                        evidence_excerpt=f"{script_name}: {trim_output(raw_script, limit=140)}",
+                        suggested_remediation=(
+                            "Remove the remote fetch from the install path or pin it behind a reviewed build step."
+                            if is_remote
+                            else "Review whether the lifecycle script is necessary and document or minimize it if it must run during install."
+                        ),
+                    )
+                )
+
         for name, version in self._package_json_versions(payload):
             if version in {"*", "latest"}:
                 findings.append(
@@ -228,6 +296,14 @@ class DependencyAgent(BaseAgent):
                         suggested_remediation="Review whether this dependency should be replaced with a pinned registry release.",
                     )
                 )
+            finding = self._high_risk_dependency_finding(
+                relative_path,
+                ecosystem="node",
+                package_name=name,
+                version=version,
+            )
+            if finding is not None:
+                findings.append(finding)
         return findings
 
     def _analyze_pyproject(
@@ -285,6 +361,14 @@ class DependencyAgent(BaseAgent):
                     suggested_remediation="Review whether this dependency should be replaced with a pinned release artifact.",
                 )
             )
+        for name in self._pyproject_dependency_names(payload):
+            finding = self._high_risk_dependency_finding(
+                relative_path,
+                ecosystem="python",
+                package_name=name,
+            )
+            if finding is not None:
+                findings.append(finding)
         return findings
 
     def _analyze_requirements(self, relative_path: str, file_path: Path) -> list[DependencyFinding]:
@@ -312,6 +396,17 @@ class DependencyAgent(BaseAgent):
                     )
                 )
                 continue
+            package_name = self._requirement_name(line)
+            if package_name:
+                finding = self._high_risk_dependency_finding(
+                    relative_path,
+                    ecosystem="python",
+                    package_name=package_name,
+                    line_start=line_number,
+                    evidence_excerpt=trim_output(raw_line, limit=180),
+                )
+                if finding is not None:
+                    findings.append(finding)
             if "==" not in line and not line.startswith("-"):
                 findings.append(
                     self._finding(
@@ -338,7 +433,7 @@ class DependencyAgent(BaseAgent):
         if text is None:
             return []
         try:
-            tomllib.loads(text)
+            payload = tomllib.loads(text)
         except tomllib.TOMLDecodeError as exc:
             return [
                 self._finding(
@@ -353,9 +448,23 @@ class DependencyAgent(BaseAgent):
                 )
             ]
 
+        findings: list[DependencyFinding] = []
+        for section_name in ("packages", "dev-packages"):
+            section = payload.get(section_name)
+            if not isinstance(section, dict):
+                continue
+            for name in section.keys():
+                finding = self._high_risk_dependency_finding(
+                    relative_path,
+                    ecosystem="python",
+                    package_name=str(name),
+                )
+                if finding is not None:
+                    findings.append(finding)
+
         parent = Path(relative_path).parent.as_posix()
         if not self._relative_exists(file_map, parent, "pipfile.lock"):
-            return [
+            findings.append(
                 self._finding(
                     kind="missing_lockfile",
                     severity="medium",
@@ -365,8 +474,8 @@ class DependencyAgent(BaseAgent):
                     file_path=relative_path,
                     suggested_remediation="Commit the generated Pipfile.lock alongside the Pipfile.",
                 )
-            ]
-        return []
+            )
+        return findings
 
     def _package_json_versions(self, payload: dict[str, Any]) -> list[tuple[str, str]]:
         versions: list[tuple[str, str]] = []
@@ -408,6 +517,83 @@ class DependencyAgent(BaseAgent):
                 sources.append((str(name), json.dumps(value, sort_keys=True)))
         return sources
 
+    def _pyproject_dependency_names(self, payload: dict[str, Any]) -> set[str]:
+        names: set[str] = set()
+        project = payload.get("project")
+        if isinstance(project, dict):
+            names.update(self._requirement_names(project.get("dependencies")))
+            optional = project.get("optional-dependencies")
+            if isinstance(optional, dict):
+                for value in optional.values():
+                    names.update(self._requirement_names(value))
+
+        tool = payload.get("tool")
+        if isinstance(tool, dict):
+            poetry = tool.get("poetry")
+            if isinstance(poetry, dict):
+                names.update(self._mapping_names(poetry.get("dependencies"), excluded={"python"}))
+                group = poetry.get("group")
+                if isinstance(group, dict):
+                    for group_data in group.values():
+                        if isinstance(group_data, dict):
+                            names.update(self._mapping_names(group_data.get("dependencies")))
+        return names
+
+    def _requirement_names(self, value: object) -> set[str]:
+        if not isinstance(value, list):
+            return set()
+        names: set[str] = set()
+        for item in value:
+            if package_name := self._requirement_name(str(item)):
+                names.add(package_name)
+        return names
+
+    def _mapping_names(self, value: object, *, excluded: set[str] | None = None) -> set[str]:
+        if not isinstance(value, dict):
+            return set()
+        excluded = {item.lower() for item in (excluded or set())}
+        return {str(key).lower() for key in value.keys() if str(key).lower() not in excluded}
+
+    def _requirement_name(self, value: str) -> str | None:
+        cleaned = value.split(";", 1)[0].strip()
+        if not cleaned or cleaned.startswith("-"):
+            return None
+        cleaned = cleaned.split("[", 1)[0]
+        token = cleaned.split(" ", 1)[0]
+        token = token.split("==", 1)[0].split(">=", 1)[0].split("<=", 1)[0].split("~=", 1)[0]
+        token = token.split("!=", 1)[0].split(">", 1)[0].split("<", 1)[0]
+        token = token.strip().lower()
+        return token or None
+
+    def _high_risk_dependency_finding(
+        self,
+        file_path: str,
+        *,
+        ecosystem: Literal["node", "python"],
+        package_name: str,
+        version: str = "",
+        line_start: int | None = None,
+        evidence_excerpt: str = "",
+    ) -> DependencyFinding | None:
+        normalized = package_name.strip().lower()
+        package_map = HIGH_RISK_NODE_PACKAGES if ecosystem == "node" else HIGH_RISK_PYTHON_PACKAGES
+        details = package_map.get(normalized)
+        if details is None:
+            return None
+        reason, severity = details
+        evidence = evidence_excerpt or f"{normalized}: {version}".strip(": ")
+        return self._finding(
+            kind="high_risk_dependency",
+            severity=severity,
+            confidence="medium",
+            title="Project depends on a stale or historically risky package",
+            description=f"`{normalized}` deserves review. {reason}",
+            file_path=file_path,
+            line_start=line_start,
+            evidence_excerpt=evidence,
+            suggested_remediation="Review whether this dependency can be upgraded, replaced, or isolated behind stronger supply-chain controls.",
+        )
+
     def _relative_exists(self, file_map: dict[str, Path], parent: str, name: str) -> bool:
         candidate = name if parent in {"", "."} else f"{parent}/{name}"
         return candidate in file_map
@@ -444,8 +630,15 @@ class DependencyAgent(BaseAgent):
             return f"Scanned {report.scanned_files} dependency files and found no obvious dependency hygiene issues."
         return (
             f"Scanned {report.scanned_files} dependency files and produced {len(report.findings)} findings "
-            "about lockfile coverage and dependency source stability."
+            "about lockfile coverage, install-time behavior, and dependency source stability."
         )
+
+    def _patch_strategy(self, kind: DependencyFindingKind) -> str:
+        if kind in {"missing_lockfile", "multiple_lockfiles", "floating_version", "git_dependency"}:
+            return "pin_dependency"
+        if kind in {"install_script_review", "remote_install_script", "high_risk_dependency"}:
+            return "manual_review"
+        return "tighten_config"
 
 
 async def run(context: AgentContext) -> AgentResult:
